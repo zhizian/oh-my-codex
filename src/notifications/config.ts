@@ -307,6 +307,23 @@ function applyHookConfigIfPresent(config: FullNotificationConfig): FullNotificat
   return mergeHookConfigIntoNotificationConfig(hookConfig, config);
 }
 
+function hasCustomTransportAlias(config: FullNotificationConfig): boolean {
+  const cli = config.custom_cli_command;
+  const webhook = config.custom_webhook_command;
+  const cliEnabled = Boolean(cli && cli.enabled !== false && cli.command);
+  const webhookEnabled = Boolean(webhook && webhook.enabled !== false && webhook.url);
+  return cliEnabled || webhookEnabled;
+}
+
+function normalizeCustomTransportGate(config: FullNotificationConfig): FullNotificationConfig {
+  if (config.openclaw?.enabled) return config;
+  if (!hasCustomTransportAlias(config)) return config;
+  return {
+    ...config,
+    openclaw: { enabled: true },
+  };
+}
+
 export function getNotificationConfig(
   profileName?: string,
 ): FullNotificationConfig | null {
@@ -325,7 +342,7 @@ export function getNotificationConfig(
         const merged = envConfig
           ? mergeEnvIntoFileConfig(profileConfig, envConfig)
           : profileConfig;
-        return applyHookConfigIfPresent(merged);
+        return applyHookConfigIfPresent(normalizeCustomTransportGate(merged));
       }
 
       // Fall back to flat config (backward compatible)
@@ -334,7 +351,9 @@ export function getNotificationConfig(
       }
       const envConfig = buildConfigFromEnv();
       if (envConfig) {
-        return applyHookConfigIfPresent(mergeEnvIntoFileConfig(notifications, envConfig));
+        return applyHookConfigIfPresent(
+          normalizeCustomTransportGate(mergeEnvIntoFileConfig(notifications, envConfig)),
+        );
       }
       const envMention = validateMention(process.env.OMX_DISCORD_MENTION);
       if (envMention) {
@@ -345,9 +364,9 @@ export function getNotificationConfig(
         if (patched.discord && patched.discord.mention === undefined) {
           patched.discord = { ...patched.discord, mention: envMention };
         }
-        return applyHookConfigIfPresent(patched);
+        return applyHookConfigIfPresent(normalizeCustomTransportGate(patched));
       }
-      return applyHookConfigIfPresent(notifications);
+      return applyHookConfigIfPresent(normalizeCustomTransportGate(notifications));
     }
   }
 
@@ -441,7 +460,8 @@ export function isEventEnabled(
       config.telegram?.enabled ||
       config.slack?.enabled ||
       config.webhook?.enabled ||
-      config.openclaw?.enabled
+      config.openclaw?.enabled ||
+      hasCustomTransportAlias(config)
     );
   }
 
@@ -461,7 +481,8 @@ export function isEventEnabled(
     config.telegram?.enabled ||
     config.slack?.enabled ||
     config.webhook?.enabled ||
-    config.openclaw?.enabled
+    config.openclaw?.enabled ||
+    hasCustomTransportAlias(config)
   );
 }
 
