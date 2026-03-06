@@ -38,6 +38,7 @@ const OMX_TEAM_WORKER_CLI_MAP_ENV = 'OMX_TEAM_WORKER_CLI_MAP';
 const OMX_TEAM_WORKER_LAUNCH_MODE_ENV = 'OMX_TEAM_WORKER_LAUNCH_MODE';
 const OMX_TEAM_AUTO_INTERRUPT_RETRY_ENV = 'OMX_TEAM_AUTO_INTERRUPT_RETRY';
 const CLAUDE_SKIP_PERMISSIONS_FLAG = '--dangerously-skip-permissions';
+const GEMINI_PROMPT_INTERACTIVE_FLAG = '-i';
 const GEMINI_APPROVAL_MODE_FLAG = '--approval-mode';
 const GEMINI_APPROVAL_MODE_YOLO = 'yolo';
 const OMX_LEADER_NODE_PATH_ENV = 'OMX_LEADER_NODE_PATH';
@@ -514,13 +515,16 @@ export function resolveTeamWorkerCliPlan(
   });
 }
 
-export function translateWorkerLaunchArgsForCli(workerCli: TeamWorkerCli, args: string[]): string[] {
+export function translateWorkerLaunchArgsForCli(workerCli: TeamWorkerCli, args: string[], initialPrompt?: string): string[] {
   if (workerCli === 'codex') return [...args];
   if (workerCli === 'gemini') {
     const model = extractModelOverride(args);
-    return model
-      ? [GEMINI_APPROVAL_MODE_FLAG, GEMINI_APPROVAL_MODE_YOLO, MODEL_FLAG, model]
-      : [GEMINI_APPROVAL_MODE_FLAG, GEMINI_APPROVAL_MODE_YOLO];
+    const geminiModel = model && /gemini/i.test(model) ? model : null;
+    const translatedArgs = [GEMINI_APPROVAL_MODE_FLAG, GEMINI_APPROVAL_MODE_YOLO];
+    const trimmedPrompt = initialPrompt?.trim();
+    if (trimmedPrompt) translatedArgs.push(GEMINI_PROMPT_INTERACTIVE_FLAG, trimmedPrompt);
+    if (geminiModel) translatedArgs.push(MODEL_FLAG, geminiModel);
+    return translatedArgs;
   }
 
   // Claude workers must launch with exactly one permissions bypass flag.
@@ -601,6 +605,7 @@ export function buildWorkerStartupCommand(
   cwd: string = process.cwd(),
   extraEnv: Record<string, string> = {},
   workerCliOverride?: TeamWorkerCli,
+  initialPrompt?: string,
 ): string {
   const processSpec = buildWorkerProcessLaunchSpec(
     teamName,
@@ -609,6 +614,7 @@ export function buildWorkerStartupCommand(
     cwd,
     extraEnv,
     workerCliOverride,
+    initialPrompt,
   );
   const launchSpec = buildWorkerLaunchSpec(process.env.SHELL);
   const leaderNodeDir = resolveLeaderNodePath().replace(/\/[^/]+$/, ''); // dirname
@@ -629,10 +635,11 @@ export function buildWorkerProcessLaunchSpec(
   cwd: string = process.cwd(),
   extraEnv: Record<string, string> = {},
   workerCliOverride?: TeamWorkerCli,
+  initialPrompt?: string,
 ): WorkerProcessLaunchSpec {
   const fullLaunchArgs = resolveWorkerLaunchArgs(launchArgs, cwd);
   const workerCli = workerCliOverride ?? resolveTeamWorkerCli(fullLaunchArgs, process.env);
-  const cliLaunchArgs = translateWorkerLaunchArgsForCli(workerCli, fullLaunchArgs);
+  const cliLaunchArgs = translateWorkerLaunchArgsForCli(workerCli, fullLaunchArgs, initialPrompt);
 
   const resolvedCliPath = resolveAbsoluteBinaryPath(workerCli);
   const workerEnv: Record<string, string> = {
@@ -709,7 +716,7 @@ export function createTeamSession(
   workerCount: number,
   cwd: string,
   workerLaunchArgs: string[] = [],
-  workerStartups: Array<{ cwd?: string; env?: Record<string, string> }> = [],
+  workerStartups: Array<{ cwd?: string; env?: Record<string, string>; initialPrompt?: string }> = [],
 ): TeamSession {
   if (!isTmuxAvailable()) {
     throw new Error('tmux is not available');
@@ -768,6 +775,7 @@ export function createTeamSession(
         workerCwd,
         workerEnv,
         workerCliPlan[i - 1],
+        startup.initialPrompt,
       );
       // First split creates the right side from leader. Remaining splits stack on the right.
       const splitDirection = i === 1 ? '-h' : '-v';

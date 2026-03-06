@@ -385,13 +385,23 @@ describe('buildWorkerStartupCommand', () => {
     delete process.env.OMX_TEAM_WORKER_CLI; // auto
     process.env.OMX_BYPASS_DEFAULT_SYSTEM_PROMPT = '0';
     try {
-      const cmd = buildWorkerStartupCommand('alpha', 1, ['--model', 'gemini-2.0-pro']);
+      const cmd = buildWorkerStartupCommand(
+        'alpha',
+        1,
+        ['--model', 'gemini-2.0-pro'],
+        process.cwd(),
+        {},
+        undefined,
+        'Read worker inbox',
+      );
       assert.match(cmd, /exec .*gemini/);
       assert.match(cmd, /--approval-mode/);
       assert.match(cmd, /yolo/);
       assert.match(cmd, /--model/);
       assert.match(cmd, /gemini-2.0-pro/);
-      assert.doesNotMatch(cmd, /\s-i(\s|$)/);
+      assert.match(cmd, /(?:^|\s|')-i(?:'|\s|$)/);
+      assert.match(cmd, /Read worker inbox/);
+      assert.match(cmd, /Read worker inbox/);
     } finally {
       if (typeof prevShell === 'string') process.env.SHELL = prevShell;
       else delete process.env.SHELL;
@@ -772,14 +782,29 @@ describe('team worker CLI helpers', () => {
     );
   });
 
-  it('translateWorkerLaunchArgsForCli emits approval-mode and optional model for gemini', () => {
+  it('translateWorkerLaunchArgsForCli emits gemini approval-mode by default and adds -i when initial prompt is provided', () => {
     assert.deepEqual(
       translateWorkerLaunchArgsForCli('gemini', ['--model', 'gemini-2.0-pro', '--json']),
       ['--approval-mode', 'yolo', '--model', 'gemini-2.0-pro'],
     );
     assert.deepEqual(
+      translateWorkerLaunchArgsForCli('gemini', ['--model', 'gemini-2.0-pro', '--json'], 'Read worker inbox'),
+      ['--approval-mode', 'yolo', '-i', 'Read worker inbox', '--model', 'gemini-2.0-pro'],
+    );
+    assert.deepEqual(
       translateWorkerLaunchArgsForCli('gemini', ['--json']),
       ['--approval-mode', 'yolo'],
+    );
+    assert.deepEqual(
+      translateWorkerLaunchArgsForCli('gemini', ['--json'], 'Read worker inbox'),
+      ['--approval-mode', 'yolo', '-i', 'Read worker inbox'],
+    );
+  });
+
+  it('translateWorkerLaunchArgsForCli omits non-gemini default models for gemini workers', () => {
+    assert.deepEqual(
+      translateWorkerLaunchArgsForCli('gemini', ['--model', 'gpt-5.3-codex-spark'], 'Read worker inbox'),
+      ['--approval-mode', 'yolo', '-i', 'Read worker inbox'],
     );
   });
 

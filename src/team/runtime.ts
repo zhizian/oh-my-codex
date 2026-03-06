@@ -383,6 +383,7 @@ function spawnPromptWorker(
   launchArgs: string[],
   workerEnv: Record<string, string>,
   workerCli: 'codex' | 'claude' | 'gemini',
+  initialPrompt?: string,
 ): ChildProcessByStdio<Writable, null, null> {
   const processSpec = buildWorkerProcessLaunchSpec(
     teamName,
@@ -391,6 +392,7 @@ function spawnPromptWorker(
     workerCwd,
     workerEnv,
     workerCli,
+    initialPrompt,
   );
   const child = spawn(
     processSpec.command,
@@ -603,25 +605,71 @@ export async function startTeam(
     workerInstructionsPath = await writeTeamWorkerInstructionsFile(sanitized, leaderCwd, overlay);
     setTeamModelInstructionsFile(sanitized, workerInstructionsPath);
 
-    const workerStartups = Array.from({ length: workerCount }, (_, index) => {
-      const workerName = `worker-${index + 1}`;
+    const allTasks = await listTasks(sanitized, leaderCwd);
+    const workerBootstrapPlans = [] as Array<{
+      workerName: string;
+      workerWorkspace: { cwd: string; worktreePath?: string; worktreeBranch?: string; worktreeDetached?: boolean; };
+      workerTasks: TeamTask[];
+      workerRole: string;
+      rolePromptContent: string | null;
+      inbox: string;
+      trigger: string;
+      initialPrompt?: string;
+    }>;
+
+    for (let i = 1; i <= workerCount; i++) {
+      const workerName = `worker-${i}`;
       const workerWorkspace = workerWorkspaceByName.get(workerName) ?? { cwd: leaderCwd };
+      const workerTasks = allTasks.filter(t => t.owner === workerName);
+      const taskRoles = workerTasks.map(t => t.role).filter(Boolean) as string[];
+      const uniqueTaskRoles = new Set(taskRoles);
+      const workerRole = taskRoles.length > 0 && uniqueTaskRoles.size === 1
+        ? taskRoles[0]
+        : agentType;
+      const rolePromptContent = workerRole !== agentType
+        ? await loadRolePrompt(workerRole, codexPromptsDir())
+        : null;
+      const inbox = generateInitialInbox(workerName, sanitized, agentType, workerTasks, {
+        teamStateRoot,
+        leaderCwd,
+        workerRole,
+        rolePromptContent: rolePromptContent ?? undefined,
+      });
+      const trigger = generateTriggerMessage(workerName, sanitized);
+      const initialPrompt = workerCliPlan[i - 1] === 'gemini' ? trigger : undefined;
+      if (initialPrompt) {
+        await writeWorkerInbox(sanitized, workerName, inbox, leaderCwd);
+      }
+      workerBootstrapPlans.push({
+        workerName,
+        workerWorkspace,
+        workerTasks,
+        workerRole,
+        rolePromptContent,
+        inbox,
+        trigger,
+        initialPrompt,
+      });
+    }
+
+    const workerStartups = workerBootstrapPlans.map((plan) => {
       const env: Record<string, string> = {
         [TEAM_STATE_ROOT_ENV]: teamStateRoot,
         [TEAM_LEADER_CWD_ENV]: leaderCwd,
       };
-      if (workerWorkspace.worktreePath) {
-        env.OMX_TEAM_WORKTREE_PATH = workerWorkspace.worktreePath;
+      if (plan.workerWorkspace.worktreePath) {
+        env.OMX_TEAM_WORKTREE_PATH = plan.workerWorkspace.worktreePath;
       }
-      if (workerWorkspace.worktreeBranch) {
-        env.OMX_TEAM_WORKTREE_BRANCH = workerWorkspace.worktreeBranch;
+      if (plan.workerWorkspace.worktreeBranch) {
+        env.OMX_TEAM_WORKTREE_BRANCH = plan.workerWorkspace.worktreeBranch;
       }
-      if (typeof workerWorkspace.worktreeDetached === 'boolean') {
-        env.OMX_TEAM_WORKTREE_DETACHED = workerWorkspace.worktreeDetached ? '1' : '0';
+      if (typeof plan.workerWorkspace.worktreeDetached === 'boolean') {
+        env.OMX_TEAM_WORKTREE_DETACHED = plan.workerWorkspace.worktreeDetached ? '1' : '0';
       }
       return {
-        cwd: workerWorkspace.cwd,
+        cwd: plan.workerWorkspace.cwd,
         env,
+        initialPrompt: plan.initialPrompt,
       };
     });
 
@@ -659,6 +707,7 @@ export async function startTeam(
           workerLaunchArgs,
           startup.env || {},
           workerCliPlan[i - 1],
+          startup.initialPrompt,
         );
         if (config.workers[i - 1]) {
           config.workers[i - 1].pid = child.pid;
@@ -668,31 +717,27 @@ export async function startTeam(
     await saveTeamConfig(config, leaderCwd);
 
     // 7. Wait for all workers to be ready (interactive mode), then bootstrap them
-    const allTasks = await listTasks(sanitized, leaderCwd);
     const manifest = await readTeamManifestV2(sanitized, leaderCwd);
     const dispatchPolicy = resolveDispatchPolicy(manifest?.policy, workerLaunchMode);
     for (let i = 1; i <= workerCount; i++) {
-      const workerName = `worker-${i}`;
-      const paneId = workerPaneIds[i - 1];
-      const workerWorkspace = workerWorkspaceByName.get(workerName) ?? { cwd: leaderCwd };
-
-      // Get tasks assigned to this worker
-      const workerTasks = allTasks.filter(t => t.owner === workerName);
-
-      // Resolve per-worker role from assigned task roles
-      const taskRoles = workerTasks.map(t => t.role).filter(Boolean) as string[];
-      const uniqueTaskRoles = new Set(taskRoles);
-      const workerRole = taskRoles.length > 0 && uniqueTaskRoles.size === 1
-        ? taskRoles[0]
-        : agentType;
-      if (uniqueTaskRoles.size > 1) {
-        console.log(`[omx:team] ${workerName}: mixed task roles [${[...uniqueTaskRoles].join(', ')}], falling back to ${agentType}`);
+      const bootstrapPlan = workerBootstrapPlans[i - 1];
+      if (!bootstrapPlan) {
+        throw new Error(`missing bootstrap plan for worker-${i}`);
       }
+      const { workerName, paneId, workerTasks, workerRole, inbox, trigger, initialPrompt } = {
+        workerName: bootstrapPlan.workerName,
+        paneId: workerPaneIds[i - 1],
+        workerTasks: bootstrapPlan.workerTasks,
+        workerRole: bootstrapPlan.workerRole,
+        inbox: bootstrapPlan.inbox,
+        trigger: bootstrapPlan.trigger,
+        initialPrompt: bootstrapPlan.initialPrompt,
+      };
+      const workerWorkspace = bootstrapPlan.workerWorkspace;
 
-      // Load role-specific prompt content if role differs from default
-      const rolePromptContent = workerRole !== agentType
-        ? await loadRolePrompt(workerRole, codexPromptsDir())
-        : null;
+      if (workerTasks.map(t => t.role).filter(Boolean).length > 0 && new Set(workerTasks.map(t => t.role).filter(Boolean)).size > 1) {
+        console.log(`[omx:team] ${workerName}: mixed task roles [${[...new Set(workerTasks.map(t => t.role).filter(Boolean))].join(', ')}], falling back to ${agentType}`);
+      }
 
       // Write worker identity
       const identity: WorkerInfo = {
@@ -729,7 +774,7 @@ export async function startTeam(
       await writeWorkerIdentity(sanitized, workerName, identity, leaderCwd);
 
       // Wait for worker readiness
-      if (workerLaunchMode === 'interactive' && !skipWorkerReadyWait) {
+      if (workerLaunchMode === 'interactive' && !skipWorkerReadyWait && !initialPrompt) {
         const ready = waitForWorkerReady(sessionName, i, workerReadyTimeoutMs, paneId);
         if (!ready) {
           throw new Error(`Worker ${workerName} did not become ready in tmux session ${sessionName}`);
@@ -739,40 +784,37 @@ export async function startTeam(
       // Queue inbox via MCP/state then notify worker via tmux transport.
       // Retry dispatch up to 3 times to handle Codex trust prompts that may
       // block the worker pane during startup (fixes #393).
-      const inbox = generateInitialInbox(workerName, sanitized, agentType, workerTasks, {
-        teamStateRoot,
-        leaderCwd,
-        workerRole,
-        rolePromptContent: rolePromptContent ?? undefined,
-      });
-      const trigger = generateTriggerMessage(workerName, sanitized);
       const maxStartupDispatchRetries = 3;
       const startupRetryDelayS = 3;
-      let dispatchOutcome: DispatchOutcome = { ok: false, transport: 'none', reason: 'not_attempted' };
-      for (let attempt = 1; attempt <= maxStartupDispatchRetries; attempt++) {
-        dispatchOutcome = await dispatchCriticalInboxInstruction({
-          teamName: sanitized,
-          config: config!,
-          workerName,
-          workerIndex: i,
-          paneId,
-          inbox,
-          triggerMessage: trigger,
-          cwd: leaderCwd,
-          dispatchPolicy,
-          inboxCorrelationKey: `startup:${workerName}`,
-        });
-        if (dispatchOutcome.ok) break;
-        if (attempt < maxStartupDispatchRetries) {
-          // Check for trust prompt blocking the worker and dismiss it before retry
-          if (workerLaunchMode === 'interactive') {
-            if (dismissTrustPromptIfPresent(sessionName, i, paneId)) {
-              waitForWorkerReady(sessionName, i, workerReadyTimeoutMs, paneId);
+      let dispatchOutcome: DispatchOutcome = initialPrompt
+        ? { ok: true, transport: 'none', reason: 'startup_prompt_delivered_at_launch' }
+        : { ok: false, transport: 'none', reason: 'not_attempted' };
+      if (!initialPrompt) {
+        for (let attempt = 1; attempt <= maxStartupDispatchRetries; attempt++) {
+          dispatchOutcome = await dispatchCriticalInboxInstruction({
+            teamName: sanitized,
+            config: config!,
+            workerName,
+            workerIndex: i,
+            paneId,
+            inbox,
+            triggerMessage: trigger,
+            cwd: leaderCwd,
+            dispatchPolicy,
+            inboxCorrelationKey: `startup:${workerName}`,
+          });
+          if (dispatchOutcome.ok) break;
+          if (attempt < maxStartupDispatchRetries) {
+            // Check for trust prompt blocking the worker and dismiss it before retry
+            if (workerLaunchMode === 'interactive') {
+              if (dismissTrustPromptIfPresent(sessionName, i, paneId)) {
+                waitForWorkerReady(sessionName, i, workerReadyTimeoutMs, paneId);
+              } else {
+                sleepFractionalSeconds(startupRetryDelayS);
+              }
             } else {
               sleepFractionalSeconds(startupRetryDelayS);
             }
-          } else {
-            sleepFractionalSeconds(startupRetryDelayS);
           }
         }
       }

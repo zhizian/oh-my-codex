@@ -146,10 +146,14 @@ describe('tmux claude workers demo', () => {
       assert.deepEqual(result, ['--dangerously-skip-permissions']);
     });
 
-    it('returns gemini approval-mode yolo with model passthrough', () => {
+    it('returns gemini approval-mode yolo by default and adds -i when initial prompt is provided', () => {
       const args = ['--model', 'gemini-2.0-pro', '--json'];
       const result = translateWorkerLaunchArgsForCli('gemini', args);
       assert.deepEqual(result, ['--approval-mode', 'yolo', '--model', 'gemini-2.0-pro']);
+      assert.deepEqual(
+        translateWorkerLaunchArgsForCli('gemini', ['--json'], 'Read worker inbox'),
+        ['--approval-mode', 'yolo', '-i', 'Read worker inbox'],
+      );
     });
   });
 
@@ -253,9 +257,9 @@ describe('tmux claude workers demo', () => {
       });
       assert.deepEqual(plan, ['gemini']);
 
-      const spec = buildWorkerProcessLaunchSpec('team', 1, ['--model', 'gemini-2.0-pro'], '/tmp', {}, 'gemini');
+      const spec = buildWorkerProcessLaunchSpec('team', 1, ['--model', 'gemini-2.0-pro'], '/tmp', {}, 'gemini', 'Read worker inbox');
       assert.equal(spec.workerCli, 'gemini');
-      assert.deepEqual(spec.args, ['--approval-mode', 'yolo', '--model', 'gemini-2.0-pro']);
+      assert.deepEqual(spec.args, ['--approval-mode', 'yolo', '-i', 'Read worker inbox', '--model', 'gemini-2.0-pro']);
     });
 
     it('rejects invalid CLI map with empty entries', () => {
