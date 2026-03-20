@@ -48,6 +48,7 @@ const SUPPORTED_MODES = [
 	"ultrawork",
 	"ultraqa",
 	"ralplan",
+	"deep-interview",
 ] as const;
 
 const STATE_TOOL_NAMES = new Set([

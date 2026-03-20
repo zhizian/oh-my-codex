@@ -142,6 +142,59 @@ describe('state-server directory initialization', () => {
     }
   });
 
+  it('writes and reads deep-interview state', async () => {
+    process.env.OMX_STATE_SERVER_DISABLE_AUTO_START = '1';
+    const { handleStateToolCall } = await import('../state-server.js');
+
+    const wd = await mkdtemp(join(tmpdir(), 'omx-state-server-test-'));
+    try {
+      const writeResponse = await handleStateToolCall({
+        params: {
+          name: 'state_write',
+          arguments: {
+            workingDirectory: wd,
+            mode: 'deep-interview',
+            active: true,
+            current_phase: 'deep-interview',
+            state: {
+              current_focus: 'intent',
+              threshold: 0.2,
+            },
+          },
+        },
+      });
+
+      assert.equal(writeResponse.isError, undefined);
+      assert.deepEqual(
+        JSON.parse(writeResponse.content[0]?.text || '{}'),
+        {
+          success: true,
+          mode: 'deep-interview',
+          path: join(wd, '.omx', 'state', 'deep-interview-state.json'),
+        },
+      );
+
+      const readResponse = await handleStateToolCall({
+        params: {
+          name: 'state_read',
+          arguments: {
+            workingDirectory: wd,
+            mode: 'deep-interview',
+          },
+        },
+      });
+
+      assert.equal(readResponse.isError, undefined);
+      const readBody = JSON.parse(readResponse.content[0]?.text || '{}') as Record<string, unknown>;
+      assert.equal(readBody.active, true);
+      assert.equal(readBody.current_phase, 'deep-interview');
+      assert.equal(readBody.current_focus, 'intent');
+      assert.equal(readBody.threshold, 0.2);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
   it('creates session-scoped state directory when session_id is provided', async () => {
     process.env.OMX_STATE_SERVER_DISABLE_AUTO_START = '1';
     const { handleStateToolCall } = await import('../state-server.js');
