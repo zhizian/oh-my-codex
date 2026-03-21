@@ -15,6 +15,7 @@ import { parse as parseToml } from '@iarna/toml';
 import { resolvePackagedExploreHarnessCommand, EXPLORE_BIN_ENV } from './explore.js';
 import { getPackageRoot } from '../utils/package.js';
 import { getDefaultBridge, isBridgeEnabled } from '../runtime/bridge.js';
+import { isLeaderRuntimeStale } from '../team/leader-activity.js';
 
 interface DoctorOptions {
   verbose?: boolean;
@@ -335,12 +336,10 @@ async function collectTeamDoctorIssues(cwd: string): Promise<TeamDoctorIssue[]> 
 
   // stale_leader: team has active workers but leader has no recent activity
   const hudStatePath = join(stateDir, 'hud-state.json');
-  if (existsSync(hudStatePath) && teamDirs.length > 0) {
+  const leaderActivityPath = join(stateDir, 'leader-runtime-activity.json');
+  if ((existsSync(hudStatePath) || existsSync(leaderActivityPath)) && teamDirs.length > 0) {
     try {
-      const hudRaw = await readFile(hudStatePath, 'utf-8');
-      const hudState = JSON.parse(hudRaw) as { last_turn_at?: string };
-      const lastTurnMs = hudState.last_turn_at ? Date.parse(hudState.last_turn_at) : NaN;
-      const leaderIsStale = !Number.isFinite(lastTurnMs) || (nowMs - lastTurnMs > leaderStaleThresholdMs);
+      const leaderIsStale = await isLeaderRuntimeStale(stateDir, leaderStaleThresholdMs, nowMs);
 
       if (leaderIsStale && !tmuxUnavailable) {
         // Check if any team tmux session has live worker panes

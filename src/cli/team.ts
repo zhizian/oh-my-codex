@@ -23,6 +23,7 @@ import {
   type TeamApiOperation,
 } from '../team/api-interop.js';
 import { teamReadConfig as readTeamConfig, teamReadTaskApproval as readTaskApproval } from '../team/team-ops.js';
+import { recordLeaderRuntimeActivity } from '../team/leader-activity.js';
 
 type TeamWorkerCli = Exclude<WorkerInfo['worker_cli'], undefined>;
 
@@ -2220,6 +2221,7 @@ export async function teamCommand(args: string[], options: TeamCliOptions = {}):
     const name = teamArgs[1];
     const wantsJson = teamArgs.includes('--json');
     if (!name) throw new Error('Usage: omx team status <team-name> [--json]');
+    await recordLeaderRuntimeActivity(cwd, 'team_status', name);
     const snapshot = await monitorTeam(name, cwd);
     if (!snapshot) {
       if (wantsJson) {

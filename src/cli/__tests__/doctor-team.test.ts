@@ -213,6 +213,42 @@ describe('omx doctor --team', () => {
     }
   });
 
+  it('does not emit stale_leader when leader recently checked team status', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-doctor-team-'));
+    try {
+      const stateDir = join(wd, '.omx', 'state');
+      const teamRoot = join(stateDir, 'team', 'eta');
+      await mkdir(join(teamRoot, 'workers', 'worker-1'), { recursive: true });
+      await writeFile(join(teamRoot, 'config.json'), JSON.stringify({
+        name: 'eta',
+        tmux_session: 'omx-team-eta',
+      }));
+
+      await writeFile(join(stateDir, 'hud-state.json'), JSON.stringify({
+        last_turn_at: new Date(Date.now() - 300_000).toISOString(),
+        turn_count: 5,
+      }));
+      await writeFile(join(stateDir, 'leader-runtime-activity.json'), JSON.stringify({
+        last_activity_at: new Date(Date.now() - 5_000).toISOString(),
+        last_source: 'team_status',
+        last_team_name: 'eta',
+      }));
+
+      const fakeBin = join(wd, 'bin');
+      await mkdir(fakeBin, { recursive: true });
+      const tmuxPath = join(fakeBin, 'tmux');
+      await writeFile(tmuxPath, '#!/bin/sh\nif [ "$1" = "list-sessions" ]; then echo "omx-team-eta"; exit 0; fi\nexit 0\n');
+      spawnSync('chmod', ['+x', tmuxPath], { encoding: 'utf-8' });
+
+      const res = runOmx(wd, ['doctor', '--team'], { PATH: `${fakeBin}:${process.env.PATH || ''}` });
+      if (shouldSkipForSpawnPermissions(res.error)) return;
+      assert.equal(res.status, 0, res.stderr || res.stdout);
+      assert.doesNotMatch(res.stdout, /stale_leader/);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
   it('does not emit orphan_tmux_session when tmux reports no server running', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-doctor-team-'));
     try {

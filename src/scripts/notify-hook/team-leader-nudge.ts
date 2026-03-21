@@ -12,6 +12,7 @@ import { runProcess } from './process-runner.js';
 import { logTmuxHookEvent } from './log.js';
 import { evaluatePaneInjectionReadiness, sendPaneInput } from './team-tmux-guard.js';
 import { DEFAULT_MARKER, resolveCodexPane } from '../tmux-hook-engine.js';
+import { isLeaderRuntimeStale } from '../../team/leader-activity.js';
 const LEADER_PANE_MISSING_NO_INJECTION_REASON = 'leader_pane_missing_no_injection';
 const LEADER_PANE_SHELL_NO_INJECTION_REASON = 'leader_pane_shell_no_injection';
 const LEADER_NOTIFICATION_DEFERRED_TYPE = 'leader_notification_deferred';
@@ -135,14 +136,7 @@ export async function checkWorkerPanesAlive(tmuxTarget, workerPaneIds = []) {
 }
 
 export async function isLeaderStale(stateDir, thresholdMs, nowMs) {
-  const hudStatePath = join(stateDir, 'hud-state.json');
-  const hudState = await readJsonIfExists(hudStatePath, null);
-  if (!hudState || typeof hudState !== 'object') return true;
-  const lastTurnAt = safeString(hudState.last_turn_at || '');
-  if (!lastTurnAt) return true;
-  const lastMs = Date.parse(lastTurnAt);
-  if (!Number.isFinite(lastMs)) return true;
-  return (nowMs - lastMs) >= thresholdMs;
+  return isLeaderRuntimeStale(stateDir, thresholdMs, nowMs);
 }
 
 function resolveTerminalAtFromPhaseDoc(parsed, fallbackIso) {

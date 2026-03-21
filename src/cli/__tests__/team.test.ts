@@ -1347,6 +1347,35 @@ describe('teamCommand status', () => {
     }
   });
 
+  it('records leader runtime activity when team status is read', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-team-status-activity-'));
+    const previousCwd = process.cwd();
+    const logs: string[] = [];
+    const originalLog = console.log;
+    try {
+      process.chdir(wd);
+      await withoutTeamTestWorkerEnv(() => initTeamState('activity-team', 'inspect activity', 'executor', 1, wd));
+      console.log = (...args: unknown[]) => logs.push(args.map(String).join(' '));
+
+      await withoutTeamTestWorkerEnv(() => teamCommand(['status', 'activity-team', '--json']));
+
+      const activity = JSON.parse(await readFile(join(wd, '.omx', 'state', 'leader-runtime-activity.json'), 'utf-8')) as {
+        last_activity_at?: string;
+        last_team_status_at?: string;
+        last_source?: string;
+        last_team_name?: string;
+      };
+      assert.equal(activity.last_source, 'team_status');
+      assert.equal(activity.last_team_name, 'activity-team');
+      assert.ok(typeof activity.last_activity_at === 'string' && activity.last_activity_at.length > 0);
+      assert.ok(typeof activity.last_team_status_at === 'string' && activity.last_team_status_at.length > 0);
+    } finally {
+      console.log = originalLog;
+      process.chdir(previousCwd);
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
   it('supports custom tail lines for generated sparkshell commands', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-team-status-tail-lines-'));
     const previousCwd = process.cwd();

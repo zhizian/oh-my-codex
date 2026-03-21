@@ -178,9 +178,68 @@ describe('notify-hook leader-side authority handoff', () => {
       assert.equal(request?.status, 'failed');
     });
   });
+
+  it('does not nudge stale leader when recent team status activity proves the leader is active', async () => {
+    await withTempWorkingDir(async (cwd) => {
+      const omxDir = join(cwd, '.omx');
+      const stateDir = join(omxDir, 'state');
+      const logsDir = join(omxDir, 'logs');
+      const teamName = 'beta-active-status';
+      const teamDir = join(stateDir, 'team', teamName);
+      const workersDir = join(teamDir, 'workers');
+      const fakeBinDir = join(cwd, 'fake-bin');
+      const fakeTmuxPath = join(fakeBinDir, 'tmux');
+      const tmuxLogPath = join(cwd, 'tmux.log');
+
+      await mkdir(logsDir, { recursive: true });
+      await mkdir(join(workersDir, 'worker-1'), { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+
+      await writeJson(join(stateDir, 'team-state.json'), {
+        active: true,
+        team_name: teamName,
+        current_phase: 'team-exec',
+      });
+      await writeJson(join(teamDir, 'config.json'), {
+        name: teamName,
+        tmux_session: 'omx-team-beta-active-status',
+        leader_pane_id: '%92',
+        workers: [
+          { name: 'worker-1', index: 1, pane_id: '%10' },
+        ],
+      });
+      await writeJson(join(stateDir, 'hud-state.json'), {
+        last_turn_at: new Date(Date.now() - 300_000).toISOString(),
+        turn_count: 5,
+      });
+      await writeJson(join(stateDir, 'leader-runtime-activity.json'), {
+        last_activity_at: new Date(Date.now() - 5_000).toISOString(),
+        last_team_status_at: new Date(Date.now() - 5_000).toISOString(),
+        last_source: 'team_status',
+        last_team_name: teamName,
+      });
+      await writeJson(join(workersDir, 'worker-1', 'status.json'), {
+        state: 'working',
+        current_task_id: '1',
+        updated_at: new Date().toISOString(),
+      });
+
+      await writeFile(fakeTmuxPath, buildFakeTmuxWithListPanes(tmuxLogPath, ['%10 12345']));
+      await chmod(fakeTmuxPath, 0o755);
+
+      const result = runNotifyHook(cwd, fakeBinDir);
+      assert.equal(result.status, 0, `notify-hook failed: ${result.stderr || result.stdout}`);
+
+      if (existsSync(tmuxLogPath)) {
+        const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
+        assert.doesNotMatch(tmuxLog, /Team beta-active-status:/);
+        assert.doesNotMatch(tmuxLog, /leader stale/);
+      }
+    });
+  });
 });
 
-describe.skip('notify-hook team leader nudge', () => {
+describe('notify-hook team leader nudge', () => {
   it('sends immediate all-workers-idle nudge for active team (leader context)', async () => {
     await withTempWorkingDir(async (cwd) => {
       const omxDir = join(cwd, '.omx');

@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-03-21
+
+Hotfix release for stale leader nudge false-positives and README onboarding clarity.
+
+### Fixed
+- **False-positive leader stale nudges** — leader activity freshness check now considers any recent leader activity, preventing spurious stale nudges when the leader is actively working. (PR [#993](https://github.com/Yeachan-Heo/oh-my-codex/pull/993))
+
+### Changed
+- **README onboarding refocused** — README now centers onboarding around the real default OMX path for clearer first-run guidance. (PR [#992](https://github.com/Yeachan-Heo/oh-my-codex/pull/992))
 
 ## [0.11.4] - 2026-03-20
 
