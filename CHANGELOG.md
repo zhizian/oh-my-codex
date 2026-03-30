@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.11.10] - 2026-03-30
+
+Patch release for approved handoff alias parsing hardening and release metadata synchronization after `0.11.9`.
+
+### Fixed
+- **Approved handoff alias parsing regression coverage** — planning artifact tests now protect single-quoted approved launch hints for both `$ralph` and `$team`, preventing quoting-form drift in execution handoff parsing. (direct commit `e08a746`)
+
+### Changed
+- **Release metadata sync** — Node and Cargo package metadata are bumped to `0.11.10` for this patch release.
+- **Release collateral refresh** — release notes and `RELEASE_BODY.md` are refreshed for the `0.11.10` cut.
+
+### Verified
+- `npx biome lint src/planning/__tests__/artifacts.test.ts`
+- `npm run build && node --test dist/planning/__tests__/artifacts.test.js`
+- `npm run test:sparkshell`
+- `npm run test:team:cross-rebase-smoke`
+- `npm run smoke:packed-install`
+- `npm test`
+
 ## [0.11.9] - 2026-03-25
 
 Patch release for deeper deep-interview / ralplan coordination, setup repair, and safer live team supervision after `0.11.8`.

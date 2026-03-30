@@ -8,6 +8,7 @@
 import { execFileSync, spawnSync } from 'child_process';
 import { sleepSync } from '../utils/sleep.js';
 import { resolveCommandPathForPlatform } from '../utils/platform-command.js';
+import { buildCapturePaneArgv as sharedBuildCapturePaneArgv } from '../scripts/tmux-hook-engine.js';
 
 export function isTmuxAvailable(): boolean {
   return resolveCommandPathForPlatform('tmux') !== null;
@@ -19,7 +20,7 @@ export function isTmuxAvailable(): boolean {
  * command injection through a malicious paneId value (issue #156).
  */
 export function buildCapturePaneArgv(paneId: string, lines: number): string[] {
-  return ['capture-pane', '-t', paneId, '-p', '-S', `-${lines}`];
+  return sharedBuildCapturePaneArgv(paneId, lines);
 }
 
 export function capturePaneContent(paneId: string, lines: number = 15): string {

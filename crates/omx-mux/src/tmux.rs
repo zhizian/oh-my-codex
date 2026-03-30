@@ -56,7 +56,7 @@ pub(crate) fn build_enter_key_args(target: &str) -> Vec<String> {
 }
 
 /// Build the argument list for `tmux capture-pane`.
-pub(crate) fn build_capture_pane_args(target: &str, visible_lines: usize) -> Vec<String> {
+pub fn build_capture_pane_args(target: &str, visible_lines: usize) -> Vec<String> {
     vec![
         "capture-pane".into(),
         "-t".into(),

@@ -310,6 +310,10 @@ export function buildCapturePaneArgv(paneTarget: any, tailLines = 80): string[] 
   return ['capture-pane', '-t', paneTarget, '-p', '-S', `-${tailLines}`];
 }
 
+export function buildVisibleCapturePaneArgv(paneTarget: any): string[] {
+  return ['capture-pane', '-t', paneTarget, '-p'];
+}
+
 export function buildSendKeysArgv({ paneTarget, prompt, dryRun, submitKeyPresses = 2 }: any): any {
   if (dryRun) return null;
   const pressCountRaw = Number.isFinite(submitKeyPresses) ? Math.floor(submitKeyPresses) : 2;

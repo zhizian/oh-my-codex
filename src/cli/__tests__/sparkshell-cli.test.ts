@@ -18,6 +18,7 @@ import {
   resolveSparkShellBinaryPathWithHydration,
   runSparkShellBinary,
 } from '../sparkshell.js';
+import { buildCapturePaneArgv as buildNotificationCapturePaneArgv } from '../../notifications/tmux-detector.js';
 
 function runOmx(
   cwd: string,
@@ -368,6 +369,14 @@ describe('parseSparkShellFallbackInvocation', () => {
       parseSparkShellFallbackInvocation(['git', 'log', '--oneline']),
       { kind: 'command', argv: ['git', 'log', '--oneline'] },
     );
+  });
+
+  it('matches the shared notification capture-pane argv contract', () => {
+    const parsed = parseSparkShellFallbackInvocation(['--tmux-pane', '%12', '--tail-lines', '400']);
+    assert.deepEqual(parsed, {
+      kind: 'tmux-pane',
+      argv: ['tmux', ...buildNotificationCapturePaneArgv('%12', 400)],
+    });
   });
 
   it('converts tmux pane mode into capture-pane argv', () => {

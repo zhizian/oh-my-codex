@@ -10,6 +10,7 @@ use crate::codex_bridge::summarize_output;
 use crate::error::SparkshellError;
 use crate::exec::execute_command;
 use crate::threshold::{combined_visible_lines, read_line_threshold};
+use omx_mux::build_capture_pane_args;
 use std::io::{self, Write};
 use std::process;
 
@@ -44,15 +45,11 @@ fn run(args: Vec<String>) -> Result<(), SparkshellError> {
         SparkShellInput::TmuxPane {
             pane_id,
             tail_lines,
-        } => vec![
-            "tmux".to_string(),
-            "capture-pane".to_string(),
-            "-t".to_string(),
-            pane_id,
-            "-p".to_string(),
-            "-S".to_string(),
-            format!("-{tail_lines}"),
-        ],
+        } => {
+            let mut argv = vec!["tmux".to_string()];
+            argv.extend(build_capture_pane_args(&pane_id, tail_lines));
+            argv
+        }
     };
 
     let output = execute_command(&execution_argv)?;

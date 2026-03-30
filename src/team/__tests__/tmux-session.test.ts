@@ -1328,6 +1328,33 @@ describe('tmux-dependent functions when tmux is unavailable', () => {
     });
   });
 
+  it('waitForWorkerReady uses visible capture-pane argv without tail flags', async () => {
+    await withMockTmuxFixture(
+      'omx-tmux-worker-ready-visible-capture-',
+      (logPath) => `#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "${logPath}"
+case "$1" in
+  capture-pane)
+    cat <<'EOF'
+${READY_HELPER_CAPTURE}
+EOF
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`,
+      async ({ logPath }) => {
+        assert.equal(waitForWorkerReady('omx-team-x', 1, 1_000), true);
+        const log = await readFile(logPath, 'utf-8');
+        assert.match(log, /capture-pane -t omx-team-x:1 -p/);
+        assert.doesNotMatch(log, /capture-pane -t omx-team-x:1 -p -S/);
+      },
+    );
+  });
+
   it('waitForWorkerReady accepts Codex 0.114.0-style welcome helper text', async () => {
     await withMockTmuxFixture(
       'omx-tmux-worker-ready-hello-',
@@ -1437,6 +1464,46 @@ esac
     withEmptyPath(() => {
       assert.equal(waitForWorkerReady('omx-team-x', 1, 1), false);
     });
+  });
+});
+
+describe('dismissTrustPromptIfPresent capture shape', () => {
+  it('uses visible capture-pane argv without tail flags', async () => {
+    const previousAutoTrust = process.env.OMX_TEAM_AUTO_TRUST;
+    delete process.env.OMX_TEAM_AUTO_TRUST;
+    try {
+      await withMockTmuxFixture(
+        'omx-tmux-dismiss-trust-visible-capture-',
+        (logPath) => `#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "${logPath}"
+case "$1" in
+  capture-pane)
+    cat <<'EOF'
+Do you trust the contents of this directory?
+Press enter to continue
+EOF
+    exit 0
+    ;;
+  send-keys)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`,
+        async ({ logPath }) => {
+          assert.equal(dismissTrustPromptIfPresent('omx-team-x', 1), true);
+          const log = await readFile(logPath, 'utf-8');
+          assert.match(log, /capture-pane -t omx-team-x:1 -p/);
+          assert.doesNotMatch(log, /capture-pane -t omx-team-x:1 -p -S/);
+        },
+      );
+    } finally {
+      if (typeof previousAutoTrust === 'string') process.env.OMX_TEAM_AUTO_TRUST = previousAutoTrust;
+      else delete process.env.OMX_TEAM_AUTO_TRUST;
+    }
   });
 });
 

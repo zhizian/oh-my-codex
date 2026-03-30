@@ -44,6 +44,7 @@ declare module '*tmux-hook-engine.js' {
     state: Record<string, unknown>;
   }): { allow: boolean; reason: string; dedupeKey?: string };
   export function buildCapturePaneArgv(paneTarget: string, tailLines?: number): string[];
+  export function buildVisibleCapturePaneArgv(paneTarget: string): string[];
   export function normalizeTmuxCapture(value: unknown): string;
   export function paneIsBootstrapping(lines: string[] | string): boolean;
   export function paneLooksReady(captured: string): boolean;

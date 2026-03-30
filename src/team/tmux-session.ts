@@ -11,6 +11,7 @@ import {
 } from '../cli/constants.js';
 import {
   buildCapturePaneArgv as sharedBuildCapturePaneArgv,
+  buildVisibleCapturePaneArgv as sharedBuildVisibleCapturePaneArgv,
   normalizeTmuxCapture as sharedNormalizeTmuxCapture,
   paneHasActiveTask as sharedPaneHasActiveTask,
   paneIsBootstrapping as sharedPaneIsBootstrapping,
@@ -1214,7 +1215,7 @@ export function waitForWorkerReady(
 
   const check = (): boolean => {
     const target = paneTarget(sessionName, workerIndex, workerPaneId);
-    const result = runTmux(['capture-pane', '-t', target, '-p']);
+    const result = runTmux(sharedBuildVisibleCapturePaneArgv(target));
     if (!result.ok) return false;
     if (dismissClaudeBypassPermissionsPromptIfPresent(target, result.stdout)) {
       promptDismissed = true;
@@ -1269,7 +1270,7 @@ export function dismissTrustPromptIfPresent(
   if (process.env.OMX_TEAM_AUTO_TRUST === '0') return false;
   if (!isTmuxAvailable()) return false;
   const target = paneTarget(sessionName, workerIndex, workerPaneId);
-  const result = runTmux(['capture-pane', '-t', target, '-p']);
+  const result = runTmux(sharedBuildVisibleCapturePaneArgv(target));
   if (!result.ok) return false;
   if (!paneHasTrustPrompt(result.stdout)) return false;
   // Trust prompt detected; send C-m twice to dismiss (trust + follow-up splash)

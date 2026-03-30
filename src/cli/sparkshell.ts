@@ -9,6 +9,7 @@ import { isAbsolute, join, resolve } from 'path';
 import { getPackageRoot } from '../utils/package.js';
 import { classifySpawnError } from '../utils/platform-command.js';
 import { readConfiguredEnvOverrides } from '../config/models.js';
+import { buildCapturePaneArgv } from '../scripts/tmux-hook-engine.js';
 import {
   SPARKSHELL_BIN_ENV as SPARKSHELL_BIN_ENV_SHARED,
   getPackageVersion,
@@ -276,15 +277,7 @@ export function parseSparkShellFallbackInvocation(args: readonly string[]): Spar
 
   return {
     kind: 'tmux-pane',
-    argv: [
-      'tmux',
-      'capture-pane',
-      '-t',
-      paneId,
-      '-p',
-      '-S',
-      `-${sawTailLines ? tailLines : 200}`,
-    ],
+    argv: ['tmux', ...buildCapturePaneArgv(paneId, sawTailLines ? tailLines : 200)],
   };
 }
 

@@ -1,52 +1,41 @@
-# oh-my-codex v0.11.9
+# oh-my-codex v0.11.10
 
-**Patch release for deeper deep-interview / ralplan coordination, setup repair, and safer live team supervision**
+**Patch release for approved handoff alias parsing hardening and clean release metadata sync**
 
-`0.11.9` follows `0.11.8` with a focused patch train that hardens deep-interview behavior, makes live ralplan progress observable, and cleans up setup / HUD / routing polish around active maintainer workflows.
+`0.11.10` follows `0.11.9` with a deliberately narrow release: it locks approved execution handoff parsing against quoting regressions for both Ralph and Team alias forms, then cuts a clean metadata-aligned patch release.
 
 ## Highlights
 
-- Deep-interview lock state now suppresses tmux-pane nudges, and the planning handoff keeps stronger deep-interview pressure before execution.
-- Live ralplan consensus planning now exposes observable runtime state for downstream HUD / pipeline visibility.
-- Setup no longer rebreaks Codex-managed TUI configs, active stateful modes stay visible in the HUD, and live worker supervision remains alive while workers are still active.
+- Approved `$ralph` launch hints are now protected by single-quoted regression coverage.
+- Approved `$team` launch hints are now protected by single-quoted regression coverage.
+- Node and Cargo release metadata are synchronized to `0.11.10` for a clean release cut.
 
 ## What’s Changed
 
 ### Fixes
-- suppress fallback tmux-pane nudges while deep-interview lock state is active
-- strengthen deep-interview pressure before planning handoff
-- keep setup compatible with Codex-managed TUI configs and align default explore-routing guidance with setup adoption
-- restore HUD visibility for active stateful modes
-- keep fallback orchestration alive while live team workers still need supervision
-- auto-accept the Claude bypass prompt in team flows when required
+- add regression coverage for single-quoted approved `$ralph` launch hints in planning artifact parsing
+- add regression coverage for single-quoted approved `$team` launch hints in planning artifact parsing
 
 ### Changed
-- expose observable ralplan runtime state during live consensus planning
-- refresh the analyze skill around OmC trace methodology and execution-policy contract wording
-- bump release metadata from `0.11.8` to `0.11.9` across the Node and Cargo packages
-- refresh maintenance baselines with `c8@11.0.0`, `@types/node@25.5.0`, and the README Star History chart
+- bump release metadata from `0.11.9` to `0.11.10` across the Node and Cargo packages
+- refresh `CHANGELOG.md`, `docs/release-notes-0.11.10.md`, and `RELEASE_BODY.md` for the release cut
 
 ## Verification
 
-- `npm run build`
-- `npm run lint`
-- `npm run check:no-unused`
-- `node --test --test-reporter=spec dist/cli/__tests__/version-sync-contract.test.js`
-- `node --test --test-reporter=spec dist/cli/__tests__/setup-refresh.test.js dist/cli/__tests__/setup-scope.test.js dist/cli/__tests__/doctor-warning-copy.test.js`
-- `node --test --test-reporter=spec dist/hooks/__tests__/explore-routing.test.js dist/hooks/__tests__/explore-sparkshell-guidance-contract.test.js dist/hooks/__tests__/deep-interview-contract.test.js dist/hooks/__tests__/notify-fallback-watcher.test.js dist/hooks/__tests__/notify-hook-auto-nudge.test.js dist/hooks/__tests__/agents-overlay.test.js`
-- `node --test --test-reporter=spec dist/hud/__tests__/index.test.js dist/hud/__tests__/render.test.js dist/hud/__tests__/state.test.js`
-- `node --test --test-reporter=spec dist/pipeline/__tests__/stages.test.js dist/ralplan/__tests__/runtime.test.js`
+- `npx biome lint src/planning/__tests__/artifacts.test.ts`
+- `npm run build && node --test dist/planning/__tests__/artifacts.test.js`
+- `npm run test:sparkshell`
+- `npm run test:team:cross-rebase-smoke`
+- `npm run smoke:packed-install`
+- `npm test`
 
 ## Remaining risk
 
-- Verification is intentionally targeted to the release-window behavior touched after `v0.11.8`; it is not a rerun of the full repository test matrix.
-- The deep-interview nudge suppression contract still depends on future nudge entrypoints preserving the same lock-state check.
-- Live ralplan observability now feeds more surfaces, so future HUD / pipeline readers should preserve the same runtime field names.
+- This release is intentionally narrow and centered on regression coverage plus metadata synchronization.
+- Future approved handoff grammar changes should keep alias-form coverage aligned across both Ralph and Team paths.
 
 ## Contributors
 
 - [@Yeachan-Heo](https://github.com/Yeachan-Heo) (Bellman)
-- [@HaD0Yun](https://github.com/HaD0Yun)
-- [@ToaruPen](https://github.com/ToaruPen)
 
-**Full Changelog**: [`v0.11.8...v0.11.9`](https://github.com/Yeachan-Heo/oh-my-codex/compare/v0.11.8...v0.11.9)
+**Full Changelog**: [`v0.11.9...v0.11.10`](https://github.com/Yeachan-Heo/oh-my-codex/compare/v0.11.9...v0.11.10)

@@ -7,7 +7,7 @@ import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
 import {
   codexHome, codexConfigPath, codexPromptsDir,
-  userSkillsDir, projectSkillsDir, omxStateDir,
+  userSkillsDir, projectSkillsDir, omxStateDir, detectLegacySkillRootOverlap,
 } from '../utils/paths.js';
 import { classifySpawnError, spawnPlatformCommandSync } from '../utils/platform-command.js';
 import { getCatalogExpectations } from './catalog-contract.js';
@@ -138,6 +138,11 @@ export async function doctor(options: DoctorOptions = {}): Promise<void> {
 
   // Check 6: Skills installed
   checks.push(await checkSkills(paths.skillsDir));
+
+  // Check 6.5: Legacy/current skill-root overlap
+  if (scopeResolution.scope === 'user') {
+    checks.push(await checkLegacySkillRootOverlap());
+  }
 
   // Check 7: AGENTS.md in project
   checks.push(checkAgentsMd(scopeResolution.scope, paths.codexHomeDir));
@@ -661,6 +666,36 @@ async function checkPrompts(dir: string): Promise<Check> {
   } catch {
     return { name: 'Prompts', status: 'fail', message: 'cannot read prompts directory' };
   }
+}
+
+async function checkLegacySkillRootOverlap(): Promise<Check> {
+  const overlap = await detectLegacySkillRootOverlap();
+  if (!overlap.legacyExists) {
+    return {
+      name: 'Legacy skill roots',
+      status: 'pass',
+      message: 'no ~/.agents/skills overlap detected',
+    };
+  }
+
+  if (overlap.overlappingSkillNames.length === 0) {
+    return {
+      name: 'Legacy skill roots',
+      status: 'warn',
+      message:
+        `legacy ~/.agents/skills still exists (${overlap.legacySkillCount} skills) alongside canonical ${overlap.canonicalDir}; remove or archive it if Codex shows duplicate entries`,
+    };
+  }
+
+  const mismatchMessage = overlap.mismatchedSkillNames.length > 0
+    ? `; ${overlap.mismatchedSkillNames.length} differ in SKILL.md content`
+    : '';
+  return {
+    name: 'Legacy skill roots',
+    status: 'warn',
+    message:
+      `${overlap.overlappingSkillNames.length} overlapping skill names between ${overlap.canonicalDir} and ${overlap.legacyDir}${mismatchMessage}; Codex Enable/Disable Skills may show duplicates until ~/.agents/skills is cleaned up`,
+  };
 }
 
 async function checkSkills(dir: string): Promise<Check> {

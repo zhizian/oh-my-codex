@@ -1,7 +1,7 @@
 mod tmux;
 mod types;
 
-pub use tmux::TmuxAdapter;
+pub use tmux::{build_capture_pane_args, TmuxAdapter};
 pub use types::*;
 
 pub fn canonical_contract_summary() -> String {
