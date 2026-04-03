@@ -299,6 +299,13 @@ function buildHudResizeCommand(hudPaneId: string, heightLines: number = HUD_TMUX
   return `resize-pane -t ${buildHudPaneTarget(hudPaneId)} -y ${resolveHudHeightLines(heightLines)}`;
 }
 
+function buildHudResizeArgs(
+  hudPaneId: string,
+  heightLines: number = HUD_TMUX_TEAM_HEIGHT_LINES,
+): string[] {
+  return ['resize-pane', '-t', buildHudPaneTarget(hudPaneId), '-y', String(resolveHudHeightLines(heightLines))];
+}
+
 function buildNestedTmuxShellCommand(command: string): string {
   if (process.platform !== 'win32') {
     return `tmux ${command}`;
@@ -899,37 +906,46 @@ export function createTeamSession(
           hudPaneId = id;
           rollbackPaneIds.push(hudPaneId);
 
-          resizeHookTarget = buildResizeHookTarget(sessionName, windowIndex);
-          resizeHookName = buildResizeHookName(safeTeamName, sessionName, windowIndex, hudPaneId);
-          const registerHook = runTmux(buildRegisterResizeHookArgs(resizeHookTarget, resizeHookName, hudPaneId));
-          if (!registerHook.ok) {
-            throw new Error(`failed to register resize hook ${resizeHookName}: ${registerHook.stderr}`);
-          }
-          registeredResizeHook = { name: resizeHookName, target: resizeHookTarget };
+          if (isNativeWindows()) {
+            // Native Windows tmux support may flow through psmux; issuing a
+            // direct control-plane resize avoids nested run-shell PATH drift.
+            const reconcile = runTmux(buildHudResizeArgs(hudPaneId));
+            if (!reconcile.ok) {
+              throw new Error(`failed to reconcile HUD resize: ${reconcile.stderr}`);
+            }
+          } else {
+            resizeHookTarget = buildResizeHookTarget(sessionName, windowIndex);
+            resizeHookName = buildResizeHookName(safeTeamName, sessionName, windowIndex, hudPaneId);
+            const registerHook = runTmux(buildRegisterResizeHookArgs(resizeHookTarget, resizeHookName, hudPaneId));
+            if (!registerHook.ok) {
+              throw new Error(`failed to register resize hook ${resizeHookName}: ${registerHook.stderr}`);
+            }
+            registeredResizeHook = { name: resizeHookName, target: resizeHookTarget };
 
-          const clientAttachedHookName = buildClientAttachedReconcileHookName(
-            safeTeamName,
-            sessionName,
-            windowIndex,
-            hudPaneId,
-          );
-          const registerClientAttachedHook = runTmux(
-            buildRegisterClientAttachedReconcileArgs(resizeHookTarget, clientAttachedHookName, hudPaneId),
-          );
-          if (!registerClientAttachedHook.ok) {
-            throw new Error(
-              `failed to register client-attached reconcile hook ${clientAttachedHookName}: ${registerClientAttachedHook.stderr}`,
+            const clientAttachedHookName = buildClientAttachedReconcileHookName(
+              safeTeamName,
+              sessionName,
+              windowIndex,
+              hudPaneId,
             );
-          }
-          registeredClientAttachedHook = { name: clientAttachedHookName, target: resizeHookTarget };
+            const registerClientAttachedHook = runTmux(
+              buildRegisterClientAttachedReconcileArgs(resizeHookTarget, clientAttachedHookName, hudPaneId),
+            );
+            if (!registerClientAttachedHook.ok) {
+              throw new Error(
+                `failed to register client-attached reconcile hook ${clientAttachedHookName}: ${registerClientAttachedHook.stderr}`,
+              );
+            }
+            registeredClientAttachedHook = { name: clientAttachedHookName, target: resizeHookTarget };
 
-          const delayed = runTmux(buildScheduleDelayedHudResizeArgs(hudPaneId));
-          if (!delayed.ok) {
-            throw new Error(`failed to schedule delayed HUD resize: ${delayed.stderr}`);
-          }
-          const reconcile = runTmux(buildReconcileHudResizeArgs(hudPaneId));
-          if (!reconcile.ok) {
-            throw new Error(`failed to reconcile HUD resize: ${reconcile.stderr}`);
+            const delayed = runTmux(buildScheduleDelayedHudResizeArgs(hudPaneId));
+            if (!delayed.ok) {
+              throw new Error(`failed to schedule delayed HUD resize: ${delayed.stderr}`);
+            }
+            const reconcile = runTmux(buildReconcileHudResizeArgs(hudPaneId));
+            if (!reconcile.ok) {
+              throw new Error(`failed to reconcile HUD resize: ${reconcile.stderr}`);
+            }
           }
         }
       }
@@ -1007,8 +1023,12 @@ export function restoreStandaloneHudPane(
   const paneId = hudResult.stdout.split('\n')[0]?.trim() ?? '';
   if (!paneId.startsWith('%')) return null;
 
-  runTmux(buildScheduleDelayedHudResizeArgs(paneId));
-  runTmux(buildReconcileHudResizeArgs(paneId));
+  if (isNativeWindows()) {
+    runTmux(buildHudResizeArgs(paneId));
+  } else {
+    runTmux(buildScheduleDelayedHudResizeArgs(paneId));
+    runTmux(buildReconcileHudResizeArgs(paneId));
+  }
   runTmux(['select-pane', '-t', normalizedLeaderPaneId]);
   return paneId;
 }
