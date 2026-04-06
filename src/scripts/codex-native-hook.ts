@@ -18,6 +18,10 @@ import {
   loadAutoNudgeConfig,
 } from "./notify-hook/auto-nudge.js";
 import {
+  buildNativePostToolUseOutput,
+  buildNativePreToolUseOutput,
+} from "./codex-native-pre-post.js";
+import {
   buildNativeHookEvent,
 } from "../hooks/extensibility/events.js";
 import type { HookEventEnvelope } from "../hooks/extensibility/types.js";
@@ -629,6 +633,10 @@ export async function dispatchCodexNativeHook(
         },
       };
     }
+  } else if (hookEventName === "PreToolUse") {
+    outputJson = buildNativePreToolUseOutput(payload);
+  } else if (hookEventName === "PostToolUse") {
+    outputJson = buildNativePostToolUseOutput(payload);
   } else if (hookEventName === "Stop") {
     outputJson = await buildStopHookOutput(payload, cwd, stateDir);
   }

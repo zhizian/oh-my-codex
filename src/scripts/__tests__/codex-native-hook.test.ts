@@ -202,6 +202,166 @@ describe("codex native hook dispatch", () => {
     }
   });
 
+  it("returns a destructive-command caution on PreToolUse for rm -rf dist", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-pretool-danger-"));
+    try {
+      const result = await dispatchCodexNativeHook(
+        {
+          hook_event_name: "PreToolUse",
+          cwd,
+          tool_name: "Bash",
+          tool_use_id: "tool-danger",
+          tool_input: { command: "rm -rf dist" },
+        },
+        { cwd },
+      );
+
+      assert.equal(result.omxEventName, "pre-tool-use");
+      assert.deepEqual(result.outputJson, {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+        },
+        systemMessage:
+          "Destructive Bash command detected (`rm -rf dist`). Confirm the target and expected side effects before running it.",
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("stays silent on PreToolUse for neutral pwd", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-pretool-neutral-"));
+    try {
+      const result = await dispatchCodexNativeHook(
+        {
+          hook_event_name: "PreToolUse",
+          cwd,
+          tool_name: "Bash",
+          tool_use_id: "tool-neutral",
+          tool_input: { command: "pwd" },
+        },
+        { cwd },
+      );
+
+      assert.equal(result.omxEventName, "pre-tool-use");
+      assert.equal(result.outputJson, null);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("returns PostToolUse remediation guidance for command-not-found output", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-posttool-failure-"));
+    try {
+      const result = await dispatchCodexNativeHook(
+        {
+          hook_event_name: "PostToolUse",
+          cwd,
+          tool_name: "Bash",
+          tool_use_id: "tool-fail",
+          tool_input: { command: "foo --version" },
+          tool_response: "{\"exit_code\":127,\"stdout\":\"\",\"stderr\":\"bash: foo: command not found\"}",
+        },
+        { cwd },
+      );
+
+      assert.equal(result.omxEventName, "post-tool-use");
+      assert.deepEqual(result.outputJson, {
+        decision: "block",
+        reason: "The Bash output indicates a command/setup failure that should be fixed before retrying.",
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext:
+            "Bash reported `command not found`, `permission denied`, or a missing file/path. Verify the command, dependency installation, PATH, file permissions, and referenced paths before retrying.",
+        },
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("treats stderr-only informative non-zero output as reviewable instead of a generic failure", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-posttool-informative-stderr-"));
+    try {
+      const result = await dispatchCodexNativeHook(
+        {
+          hook_event_name: "PostToolUse",
+          cwd,
+          tool_name: "Bash",
+          tool_use_id: "tool-useful-stderr",
+          tool_input: { command: "gh pr checks" },
+          tool_response: "{\"exit_code\":8,\"stdout\":\"\",\"stderr\":\"build pending\\nlint pass\"}",
+        },
+        { cwd },
+      );
+
+      assert.equal(result.omxEventName, "post-tool-use");
+      assert.deepEqual(result.outputJson, {
+        decision: "block",
+        reason: "The Bash command returned a non-zero exit code but produced useful output that should be reviewed before retrying.",
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext:
+            "The Bash output appears informative despite the non-zero exit code. Review and report the output before retrying instead of assuming the command simply failed.",
+        },
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("treats non-zero gh pr checks style output as informative instead of a generic failure", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-posttool-informative-"));
+    try {
+      const result = await dispatchCodexNativeHook(
+        {
+          hook_event_name: "PostToolUse",
+          cwd,
+          tool_name: "Bash",
+          tool_use_id: "tool-useful",
+          tool_input: { command: "gh pr checks" },
+          tool_response: "{\"exit_code\":8,\"stdout\":\"build\\tpending\\t2m\\nlint\\tpass\\t18s\",\"stderr\":\"\"}",
+        },
+        { cwd },
+      );
+
+      assert.equal(result.omxEventName, "post-tool-use");
+      assert.deepEqual(result.outputJson, {
+        decision: "block",
+        reason: "The Bash command returned a non-zero exit code but produced useful output that should be reviewed before retrying.",
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext:
+            "The Bash output appears informative despite the non-zero exit code. Review and report the output before retrying instead of assuming the command simply failed.",
+        },
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("stays silent on neutral successful PostToolUse output", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-posttool-neutral-"));
+    try {
+      const result = await dispatchCodexNativeHook(
+        {
+          hook_event_name: "PostToolUse",
+          cwd,
+          tool_name: "Bash",
+          tool_use_id: "tool-ok",
+          tool_input: { command: "pwd" },
+          tool_response: "{\"exit_code\":0,\"stdout\":\"/repo\",\"stderr\":\"\"}",
+        },
+        { cwd },
+      );
+
+      assert.equal(result.omxEventName, "post-tool-use");
+      assert.equal(result.outputJson, null);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("returns Stop continuation output while Autopilot is active", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-stop-autopilot-"));
     try {
