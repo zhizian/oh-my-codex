@@ -165,6 +165,10 @@ function listPanes(target: string): TmuxPaneInfo[] {
     .filter((pane) => pane.paneId.startsWith('%'));
 }
 
+export function listPaneIds(target: string): string[] {
+  return listPanes(target).map((pane) => pane.paneId);
+}
+
 function isHudWatchPane(pane: TmuxPaneInfo): boolean {
   const start = pane.startCommand || '';
   return /\bomx\b.*\bhud\b.*--watch/i.test(start);

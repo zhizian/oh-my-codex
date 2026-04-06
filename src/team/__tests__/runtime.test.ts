@@ -30,6 +30,7 @@ import {
   startTeam,
   assignTask,
   sendWorkerMessage,
+  applyCreatedInteractiveSessionToConfig,
   resolveWorkerLaunchArgsFromEnv,
   waitForWorkerStartupEvidence,
   waitForClaudeStartupEvidence,
@@ -775,6 +776,46 @@ esac
       else delete process.env.WSL_INTEROP;
       await rm(cwd, { recursive: true, force: true });
     }
+  });
+
+  it('applyCreatedInteractiveSessionToConfig persists worker pane ids before readiness waits', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-runtime-pane-persist-race-'));
+    try {
+      const config = await initTeamState('team-pane-persist-race', 'persist pane ids before readiness wait', 'executor', 2, cwd);
+      const workerPaneIds = Array.from({ length: 2 }, () => undefined as string | undefined);
+      applyCreatedInteractiveSessionToConfig(config, {
+        name: 'leader:0',
+        workerCount: 2,
+        cwd,
+        workerPaneIds: ['%2', '%3'],
+        leaderPaneId: '%1',
+        hudPaneId: '%4',
+        resizeHookName: 'resize-hook',
+        resizeHookTarget: 'leader:0',
+      }, workerPaneIds);
+
+      assert.equal(config.tmux_session, 'leader:0');
+      assert.equal(config.leader_pane_id, '%1');
+      assert.equal(config.hud_pane_id, '%4');
+      assert.deepEqual(workerPaneIds, ['%2', '%3']);
+      assert.equal(config.workers[0]?.pane_id, '%2');
+      assert.equal(config.workers[1]?.pane_id, '%3');
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('startTeam saves interactive pane ids before readiness waits in source order', async () => {
+    const source = await readFile(join(process.cwd(), 'src', 'team', 'runtime.ts'), 'utf-8');
+    const applyIndex = source.indexOf('applyCreatedInteractiveSessionToConfig(config, createdSession, workerPaneIds);');
+    const saveIndex = source.indexOf('await saveTeamConfig(config, leaderCwd);', applyIndex);
+    const readyIndex = source.indexOf('const ready = waitForWorkerReady(sessionName, i, workerReadyTimeoutMs, paneId);', saveIndex);
+
+    assert.notEqual(applyIndex, -1);
+    assert.notEqual(saveIndex, -1);
+    assert.notEqual(readyIndex, -1);
+    assert.equal(applyIndex < saveIndex, true);
+    assert.equal(saveIndex < readyIndex, true);
   });
 
   it('startTeam rejects dirty leader workspace before provisioning worker worktrees', async () => {
@@ -3205,6 +3246,95 @@ esac
           assert.match(tmuxLog, /kill-pane -t %404/);
           assert.match(tmuxLog, /kill-pane -t %405/);
           assert.match(tmuxLog, /kill-session -t omx-team-team-shutdown-dead-pane/);
+        },
+      );
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('shutdownTeam reconciles persisted worker panes with live tmux panes before teardown', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-runtime-shutdown-pane-reconcile-'));
+    try {
+      await withMockTmuxFixture(
+        {
+          dirPrefix: 'omx-runtime-shutdown-pane-reconcile-bin-',
+          tmuxScript: (tmuxLogPath) => `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "${tmuxLogPath}"
+restored_marker="${tmuxLogPath}.restored"
+case "$1" in
+  -V)
+    echo "tmux 3.4"
+    exit 0
+    ;;
+  list-panes)
+    case "$*" in
+      *"-t leader:0 -F #{pane_dead} #{pane_pid}"*)
+        exit 1
+        ;;
+      *"-t %13 -F #{pane_pid}"*)
+        echo "1013"
+        exit 0
+        ;;
+      *"-t %14 -F #{pane_pid}"*)
+        echo "1014"
+        exit 0
+        ;;
+      *"-t leader:0 -F #{pane_id}"*"#{pane_current_command}"*)
+        printf "%%11\\tzsh\\tzsh\\n%%12\\tnode\\tnode /tmp/bin/omx.js hud --watch\\n%%13\\tcodex\\tcodex\\n%%14\\tcodex\\tcodex\\n"
+        if [ -f "$restored_marker" ]; then
+          printf "%%44\\tnode\\tnode /tmp/bin/omx.js hud --watch\\n"
+        fi
+        exit 0
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+    ;;
+  split-window)
+    : > "$restored_marker"
+    printf '%%44\\n'
+    exit 0
+    ;;
+  kill-pane)
+    if [ "\${3:-}" = "%999" ]; then
+      echo "missing pane" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+  kill-session|select-pane|run-shell)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`,
+        },
+        async ({ tmuxLogPath }) => {
+          await initTeamState('team-shutdown-pane-reconcile', 'shutdown pane reconcile test', 'executor', 2, cwd);
+          const config = await readTeamConfig('team-shutdown-pane-reconcile', cwd);
+          assert.ok(config);
+          if (!config) return;
+          config.tmux_session = 'leader:0';
+          config.leader_pane_id = '%11';
+          config.hud_pane_id = '%12';
+          config.workers[0]!.pane_id = '';
+          config.workers[1]!.pane_id = '%999';
+          await saveTeamConfig(config, cwd);
+
+          await shutdownTeam('team-shutdown-pane-reconcile', cwd, { force: true });
+          const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
+          assert.doesNotMatch(tmuxLog, /kill-pane -t %11/);
+          assert.match(tmuxLog, /kill-pane -t %12/);
+          assert.match(tmuxLog, /kill-pane -t %13/);
+          assert.match(tmuxLog, /kill-pane -t %14/);
+          assert.match(tmuxLog, /kill-pane -t %999/);
+          assert.match(tmuxLog, new RegExp(`split-window -v -l ${HUD_TMUX_TEAM_HEIGHT_LINES} -t %11 -d -P -F #\{pane_id\}`));
+          assert.doesNotMatch(tmuxLog, /kill-pane -t %44/);
         },
       );
     } finally {

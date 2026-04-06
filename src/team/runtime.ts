@@ -14,6 +14,7 @@ import {
   type TeamWorkerCli,
   resolveTeamWorkerCliPlan,
   resolveTeamWorkerLaunchMode,
+  type TeamSession,
   waitForWorkerReady,
   dismissTrustPromptIfPresent,
   sleepFractionalSeconds,
@@ -26,6 +27,7 @@ import {
   teardownWorkerPanes,
   unregisterResizeHook,
   destroyTeamSession,
+  listPaneIds,
   listTeamSessions,
 } from './tmux-session.js';
 import {
@@ -215,6 +217,54 @@ interface ShutdownOptions {
 
 export interface TeamShutdownSummary {
   commitHygieneArtifacts: TeamCommitHygieneArtifactPaths | null;
+}
+
+export function applyCreatedInteractiveSessionToConfig(
+  config: TeamConfig,
+  createdSession: TeamSession,
+  workerPaneIds: Array<string | undefined>,
+): void {
+  config.tmux_session = createdSession.name;
+  config.leader_pane_id = createdSession.leaderPaneId;
+  config.hud_pane_id = createdSession.hudPaneId;
+  config.resize_hook_name = createdSession.resizeHookName;
+  config.resize_hook_target = createdSession.resizeHookTarget;
+  for (let i = 0; i < createdSession.workerPaneIds.length; i++) {
+    const paneId = createdSession.workerPaneIds[i];
+    workerPaneIds[i] = paneId;
+    if (config.workers[i]) {
+      config.workers[i].pane_id = paneId;
+    }
+  }
+}
+
+function collectShutdownPaneIds(params: {
+  config: TeamConfig;
+  livePaneIds?: string[];
+  restoredStandaloneHudPaneId?: string | null;
+}): string[] {
+  const { config, livePaneIds = [], restoredStandaloneHudPaneId = null } = params;
+  const excludedPaneIds = new Set(
+    [
+      config.leader_pane_id,
+      config.hud_pane_id,
+      restoredStandaloneHudPaneId,
+    ].filter((paneId): paneId is string => typeof paneId === 'string' && paneId.trim().startsWith('%')),
+  );
+
+  const paneIds = new Set<string>();
+  for (const paneId of [
+    ...config.workers.map((worker) => worker.pane_id),
+    ...livePaneIds,
+  ]) {
+    if (typeof paneId !== 'string') continue;
+    const normalized = paneId.trim();
+    if (!normalized.startsWith('%')) continue;
+    if (excludedPaneIds.has(normalized)) continue;
+    paneIds.add(normalized);
+  }
+
+  return [...paneIds];
 }
 
 async function logRuntimeDispatchOutcome(params: {
@@ -1894,14 +1944,7 @@ export async function startTeam(
       sessionCreated = true;
       createdWorkerPaneIds.push(...createdSession.workerPaneIds);
       createdLeaderPaneId = createdSession.leaderPaneId;
-      config.tmux_session = sessionName;
-      config.leader_pane_id = createdSession.leaderPaneId;
-      config.hud_pane_id = createdSession.hudPaneId;
-      config.resize_hook_name = createdSession.resizeHookName;
-      config.resize_hook_target = createdSession.resizeHookTarget;
-      for (let i = 0; i < createdSession.workerPaneIds.length; i++) {
-        workerPaneIds[i] = createdSession.workerPaneIds[i];
-      }
+      applyCreatedInteractiveSessionToConfig(config, createdSession, workerPaneIds);
     } else {
       config.tmux_session = `prompt-${sanitized}`;
       config.leader_pane_id = null;
@@ -2686,8 +2729,10 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
   const leaderPaneId = config.leader_pane_id;
   const hudPaneId = config.hud_pane_id;
   if (config.worker_launch_mode === 'interactive') {
-    const workerPanePids = config.workers
-      .map((w) => getWorkerPanePid(sessionName, w.index, w.pane_id))
+    const livePaneIds = listPaneIds(sessionName);
+    let shutdownPaneIds = collectShutdownPaneIds({ config, livePaneIds });
+    const workerPanePids = shutdownPaneIds
+      .map((paneId) => getWorkerPanePid(sessionName, 1, paneId))
       .filter((pid): pid is number => typeof pid === 'number' && Number.isFinite(pid) && pid > 0);
     for (const panePid of workerPanePids) {
       await terminateTrackedProcessTree(panePid);
@@ -2711,22 +2756,25 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
     if (resizeHookWarning) {
       console.warn(`[team shutdown] ${sanitized}: ${resizeHookWarning}; continuing teardown`);
     }
-    const workerPaneIds = config.workers
-      .map((w) => w.pane_id)
-      .filter((paneId): paneId is string => typeof paneId === 'string' && paneId.trim().length > 0);
-    await teardownWorkerPanes(workerPaneIds, {
-      leaderPaneId,
-      hudPaneId,
-    });
+    let restoredHudPaneId: string | null = null;
     if (hudPaneId) {
       await killWorkerByPaneIdAsync(hudPaneId, leaderPaneId ?? undefined);
       if (sessionName.includes(':')) {
-        const restoredHudPaneId = restoreStandaloneHudPane(leaderPaneId, cwd);
+        restoredHudPaneId = restoreStandaloneHudPane(leaderPaneId, cwd);
         if (!restoredHudPaneId) {
           console.warn(`[team shutdown] ${sanitized}: failed to restore standalone HUD pane`);
         }
       }
     }
+    shutdownPaneIds = collectShutdownPaneIds({
+      config,
+      livePaneIds: listPaneIds(sessionName),
+      restoredStandaloneHudPaneId: restoredHudPaneId,
+    });
+    await teardownWorkerPanes(shutdownPaneIds, {
+      leaderPaneId,
+      hudPaneId: restoredHudPaneId ?? hudPaneId,
+    });
 
     // 4. Destroy tmux session
     if (!sessionName.includes(':')) {
