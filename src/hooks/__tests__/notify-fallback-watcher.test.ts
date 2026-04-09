@@ -10,6 +10,8 @@ import { initTeamState, enqueueDispatchRequest, readDispatchRequest } from '../.
 import { buildWindowsMsysBackgroundHelperBootstrapScript } from '../../cli/index.js';
 import { writeSessionStart } from '../session.js';
 
+const DEFAULT_AUTO_NUDGE_RESPONSE = 'continue with the current task only if it is already authorized';
+
 async function appendLine(path: string, line: object): Promise<void> {
   const prev = await readFile(path, 'utf-8');
   const content = prev + `${JSON.stringify(line)}\n`;
@@ -164,6 +166,10 @@ async function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number = 
       throw new Error(`process ${child.pid ?? 'unknown'} did not exit within ${timeoutMs}ms`);
     }),
   ]);
+}
+
+function defaultAutoNudgePattern(targetPane: string): RegExp {
+  return new RegExp(`send-keys -t ${targetPane} -l ${DEFAULT_AUTO_NUDGE_RESPONSE.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')} \\[OMX_TMUX_INJECT\\]`);
 }
 
 function buildFakeTmux(
@@ -717,7 +723,7 @@ describe('notify-fallback watcher', () => {
       await writeFile(join(wd, '.omx', 'state', 'hud-state.json'), JSON.stringify({
         last_turn_at: new Date(Date.now() - 6_000).toISOString(),
         turn_count: 7,
-        last_agent_output: 'If you want, I can keep going from here.',
+        last_agent_output: 'Keep going and finish the cleanup from here.',
       }, null, 2));
       await writeFile(join(wd, '.omx', 'state', 'notify-fallback.pid'), JSON.stringify({
         pid: process.pid,
@@ -752,7 +758,7 @@ describe('notify-fallback watcher', () => {
       assert.equal(result.status, 0, result.stderr || result.stdout);
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf8').catch(() => '');
-      assert.doesNotMatch(tmuxLog, /send-keys -t %42 -l yes, proceed \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, defaultAutoNudgePattern('%42'));
 
       const watcherState = JSON.parse(await readFile(join(wd, '.omx', 'state', 'notify-fallback-state.json'), 'utf-8'));
       assert.equal(watcherState.pid, process.pid, 'authority backoff should preserve the primary watcher state owner');
@@ -823,7 +829,7 @@ describe('notify-fallback watcher', () => {
       const tmuxLog = await readFile(tmuxLogPath, 'utf8').catch(() => '');
       assert.doesNotMatch(tmuxLog, /Ralph loop active continue/);
       assert.doesNotMatch(tmuxLog, /Team dispatch-team:/);
-      assert.doesNotMatch(tmuxLog, /yes, proceed \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, new RegExp(`${DEFAULT_AUTO_NUDGE_RESPONSE.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')} \\[OMX_TMUX_INJECT\\]`));
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
@@ -894,7 +900,7 @@ describe('notify-fallback watcher', () => {
       const tmuxLog = await readFile(tmuxLogPath, 'utf8').catch(() => '');
       assert.doesNotMatch(tmuxLog, /Ralph loop active continue/);
       assert.doesNotMatch(tmuxLog, /Team dispatch-team:/);
-      assert.doesNotMatch(tmuxLog, /yes, proceed \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, new RegExp(`${DEFAULT_AUTO_NUDGE_RESPONSE.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')} \\[OMX_TMUX_INJECT\\]`));
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
@@ -1283,7 +1289,7 @@ exit 0
       await writeFile(join(wd, '.omx', 'state', 'hud-state.json'), JSON.stringify({
         last_turn_at: new Date(Date.now() - 6_000).toISOString(),
         turn_count: 7,
-        last_agent_output: 'If you want, I can keep going from here.',
+        last_agent_output: 'Keep going and finish the cleanup from here.',
       }, null, 2));
 
       const watcherScript = new URL('../../../dist/scripts/notify-fallback-watcher.js', import.meta.url).pathname;
@@ -1307,7 +1313,7 @@ exit 0
       assert.equal(result.status, 0, result.stderr || result.stdout);
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf8');
-      assert.match(tmuxLog, /send-keys -t %42 -l yes, proceed \[OMX_TMUX_INJECT\]/);
+      assert.match(tmuxLog, defaultAutoNudgePattern('%42'));
 
       const watcherStatePath = join(wd, '.omx', 'state', 'notify-fallback-state.json');
       const watcherState = JSON.parse(await readFile(watcherStatePath, 'utf-8'));
@@ -1342,7 +1348,7 @@ exit 0
       await writeFile(join(wd, '.omx', 'state', 'hud-state.json'), JSON.stringify({
         last_turn_at: new Date(Date.now() - 6_000).toISOString(),
         turn_count: 7,
-        last_agent_output: 'If you want, I can keep going from here.',
+        last_agent_output: 'Keep going and finish the cleanup from here.',
       }, null, 2));
 
       const watcherScript = new URL('../../../dist/scripts/notify-fallback-watcher.js', import.meta.url).pathname;
@@ -1365,7 +1371,7 @@ exit 0
       assert.equal(result.status, 0, result.stderr || result.stdout);
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf8').catch(() => '');
-      assert.doesNotMatch(tmuxLog, /send-keys -t %42 -l yes, proceed \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, defaultAutoNudgePattern('%42'));
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
@@ -1389,7 +1395,7 @@ exit 0
       await writeFile(join(wd, '.omx', 'state', 'hud-state.json'), JSON.stringify({
         last_turn_at: new Date(Date.now() - 6_000).toISOString(),
         turn_count: 9,
-        last_agent_output: 'If you want, I can keep going from here.',
+        last_agent_output: 'Keep going and finish the cleanup from here.',
       }, null, 2));
 
       const watcherScript = new URL('../../../dist/scripts/notify-fallback-watcher.js', import.meta.url).pathname;
@@ -1411,7 +1417,7 @@ exit 0
       assert.equal(result.status, 0, result.stderr || result.stdout);
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf8').catch(() => '');
-      assert.doesNotMatch(tmuxLog, /send-keys -t %42 -l yes, proceed \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, defaultAutoNudgePattern('%42'));
 
       const watcherStatePath = join(wd, '.omx', 'state', 'notify-fallback-state.json');
       const watcherState = JSON.parse(await readFile(watcherStatePath, 'utf-8'));
@@ -1443,7 +1449,7 @@ exit 0
       await writeFile(join(wd, '.omx', 'state', 'hud-state.json'), JSON.stringify({
         last_turn_at: new Date(Date.now() - 1_000).toISOString(),
         turn_count: 8,
-        last_agent_output: 'If you want, I can keep going from here.',
+        last_agent_output: 'Keep going and finish the cleanup from here.',
       }, null, 2));
 
       const watcherScript = new URL('../../../dist/scripts/notify-fallback-watcher.js', import.meta.url).pathname;
@@ -1465,7 +1471,7 @@ exit 0
       assert.equal(result.status, 0, result.stderr || result.stdout);
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf8').catch(() => '');
-      assert.doesNotMatch(tmuxLog, /send-keys -t %42 -l yes, proceed \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, defaultAutoNudgePattern('%42'));
 
       const watcherStatePath = join(wd, '.omx', 'state', 'notify-fallback-state.json');
       const watcherState = JSON.parse(await readFile(watcherStatePath, 'utf-8'));
@@ -1482,7 +1488,7 @@ exit 0
     const tmuxLogPath = join(wd, 'tmux.log');
     const codexHome = join(wd, 'codex-home');
     const lastTurnAt = new Date(Date.now() - 6_000).toISOString();
-    const lastMessage = 'If you want, I can keep going from here.';
+    const lastMessage = 'Keep going and finish the cleanup from here.';
     try {
       await mkdir(join(wd, '.omx', 'logs'), { recursive: true });
       await mkdir(join(wd, '.omx', 'state'), { recursive: true });
@@ -1524,7 +1530,7 @@ exit 0
       assert.equal(result.status, 0, result.stderr || result.stdout);
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf8').catch(() => '');
-      assert.doesNotMatch(tmuxLog, /send-keys -t %42 -l yes, proceed \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, defaultAutoNudgePattern('%42'));
 
       const watcherStatePath = join(wd, '.omx', 'state', 'notify-fallback-state.json');
       const watcherState = JSON.parse(await readFile(watcherStatePath, 'utf-8'));
@@ -1541,7 +1547,7 @@ exit 0
     const tmuxLogPath = join(wd, 'tmux.log');
     const codexHome = join(wd, 'codex-home');
     const lastTurnAt = '2026-03-01T00:00:00.000Z';
-    const lastMessage = 'If you want, I can keep going from here.';
+    const lastMessage = 'Keep going and finish the cleanup from here.';
     try {
       await mkdir(join(wd, '.omx', 'logs'), { recursive: true });
       await mkdir(join(wd, '.omx', 'state'), { recursive: true });
@@ -1583,7 +1589,7 @@ exit 0
       assert.equal(result.status, 0, result.stderr || result.stdout);
 
       const tmuxLog = await readFile(tmuxLogPath, 'utf8').catch(() => '');
-      assert.doesNotMatch(tmuxLog, /send-keys -t %42 -l yes, proceed \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, defaultAutoNudgePattern('%42'));
 
       const watcherStatePath = join(wd, '.omx', 'state', 'notify-fallback-state.json');
       const watcherState = JSON.parse(await readFile(watcherStatePath, 'utf-8'));
