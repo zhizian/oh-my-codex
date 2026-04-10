@@ -1210,6 +1210,7 @@ const TEAM_LEADER_CWD_ENV = 'OMX_TEAM_LEADER_CWD';
 const WORKTREE_TRIGGER_STATE_ROOT = '$OMX_TEAM_STATE_ROOT';
 const STARTUP_EVIDENCE_TIMEOUT_MS = 2_000;
 const STARTUP_EVIDENCE_POLL_MS = 100;
+const STARTUP_EVIDENCE_LAUNCH_TIMEOUT_MS = 5_000;
 
 interface PromptWorkerHandle {
   child: ChildProcessByStdio<Writable, null, null>;
@@ -1232,6 +1233,18 @@ function resolveWorkerReadyTimeoutMs(env: NodeJS.ProcessEnv): number {
   const parsed = Number.parseInt(String(raw ?? ''), 10);
   if (Number.isFinite(parsed) && parsed >= 5_000) return parsed;
   return 45_000;
+}
+
+function resolveWorkerStartupEvidenceTimeoutMs(
+  env: NodeJS.ProcessEnv,
+  workerReadyTimeoutMs: number,
+): number {
+  const raw = Number.parseInt(String(env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS ?? ''), 10);
+  if (Number.isFinite(raw) && raw >= 500) return raw;
+  return Math.max(
+    STARTUP_EVIDENCE_TIMEOUT_MS,
+    Math.min(workerReadyTimeoutMs, STARTUP_EVIDENCE_LAUNCH_TIMEOUT_MS),
+  );
 }
 
 function parseTeamWorkerContext(raw: string | undefined): { teamName: string; workerName: string } | null {
@@ -1883,6 +1896,10 @@ export async function startTeam(
   });
   const workerCliPlan = resolveTeamWorkerCliPlan(workerCount, sharedWorkerLaunchArgs, process.env);
   const workerReadyTimeoutMs = resolveWorkerReadyTimeoutMs(process.env);
+  const workerStartupEvidenceTimeoutMs = resolveWorkerStartupEvidenceTimeoutMs(
+    process.env,
+    workerReadyTimeoutMs,
+  );
   const skipWorkerReadyWait = shouldSkipWorkerReadyWait(process.env);
 
   try {
@@ -2181,6 +2198,7 @@ export async function startTeam(
             dispatchPolicy,
             inboxCorrelationKey: `startup:${workerName}`,
             requireWorkerStartupEvidence: true,
+            startupEvidenceTimeoutMs: workerStartupEvidenceTimeoutMs,
           });
           if (dispatchOutcome.ok) break;
           if (attempt < maxStartupDispatchRetries) {
@@ -3367,6 +3385,7 @@ async function dispatchCriticalInboxInstruction(params: {
   dispatchPolicy: TeamPolicy;
   inboxCorrelationKey: string;
   requireWorkerStartupEvidence?: boolean;
+  startupEvidenceTimeoutMs?: number;
 }): Promise<DispatchOutcome> {
   const {
     teamName,
@@ -3382,6 +3401,7 @@ async function dispatchCriticalInboxInstruction(params: {
     dispatchPolicy,
     inboxCorrelationKey,
     requireWorkerStartupEvidence,
+    startupEvidenceTimeoutMs,
   } = params;
 
   if (config.worker_launch_mode === 'prompt') {
@@ -3454,6 +3474,7 @@ async function dispatchCriticalInboxInstruction(params: {
       workerName,
       workerCli,
       cwd,
+      timeoutMs: startupEvidenceTimeoutMs,
     });
     if (startupEvidence !== 'none') {
       return {
@@ -3467,6 +3488,30 @@ async function dispatchCriticalInboxInstruction(params: {
   if (receipt?.status === 'failed') {
     const fallback = await notifyWorkerOutcome(config, workerIndex, triggerMessage, paneId);
     if (fallback.ok) {
+      const fallbackStartupEvidence = await waitForRequiredStartupEvidenceAfterDirectFallback({
+        requireWorkerStartupEvidence,
+        workerCli,
+        teamName,
+        workerName,
+        cwd,
+        timeoutMs: startupEvidenceTimeoutMs,
+      });
+      if (requiresObservedStartupEvidence && fallbackStartupEvidence === 'none') {
+        await transitionDispatchRequest(
+          teamName,
+          queued.request_id,
+          'failed',
+          'failed',
+          { last_reason: `${workerCli}_startup_no_evidence_after_fallback:${fallback.reason}` },
+          cwd,
+        ).catch(() => {});
+        return {
+          ok: false,
+          transport: fallback.transport,
+          reason: `${workerCli}_startup_no_evidence_after_fallback:${fallback.reason}`,
+          request_id: queued.request_id,
+        };
+      }
       await transitionDispatchRequest(
         teamName,
         queued.request_id,
@@ -3506,6 +3551,33 @@ async function dispatchCriticalInboxInstruction(params: {
     ? `${startupFallbackLabel}_fallback_failed:${fallback.reason}`
     : `fallback_attempted_but_unconfirmed:${fallback.reason}`;
   if (fallback.ok) {
+    const fallbackStartupEvidence = await waitForRequiredStartupEvidenceAfterDirectFallback({
+      requireWorkerStartupEvidence,
+      workerCli,
+      teamName,
+      workerName,
+      cwd,
+      timeoutMs: startupEvidenceTimeoutMs,
+    });
+    if (requiresObservedStartupEvidence && fallbackStartupEvidence === 'none') {
+      const current = await readDispatchRequest(teamName, queued.request_id, cwd);
+      if (current && current.status !== 'failed') {
+        await transitionDispatchRequest(
+          teamName,
+          queued.request_id,
+          current.status,
+          'failed',
+          { last_reason: `${workerCli}_startup_no_evidence_after_fallback:${fallback.reason}` },
+          cwd,
+        ).catch(() => {});
+      }
+      return {
+        ok: false,
+        transport: fallback.transport,
+        reason: `${workerCli}_startup_no_evidence_after_fallback:${fallback.reason}`,
+        request_id: queued.request_id,
+      };
+    }
     const marked = await markDispatchRequestNotified(
       teamName,
       queued.request_id,
@@ -3549,6 +3621,36 @@ async function dispatchCriticalInboxInstruction(params: {
     reason: fallbackFailureReason,
     request_id: queued.request_id,
   };
+}
+
+async function waitForRequiredStartupEvidenceAfterDirectFallback(params: {
+  requireWorkerStartupEvidence?: boolean;
+  workerCli?: TeamWorkerCli;
+  teamName: string;
+  workerName: string;
+  cwd: string;
+  timeoutMs?: number;
+}): Promise<WorkerStartupEvidence> {
+  const {
+    requireWorkerStartupEvidence,
+    workerCli,
+    teamName,
+    workerName,
+    cwd,
+    timeoutMs,
+  } = params;
+  const requiresObservedStartupEvidence = requireWorkerStartupEvidence === true
+    && (workerCli === 'claude' || workerCli === 'codex');
+  if (!requiresObservedStartupEvidence || !workerCli) {
+    return 'none';
+  }
+  return await waitForWorkerStartupEvidence({
+    teamName,
+    workerName,
+    workerCli,
+    cwd,
+    timeoutMs,
+  });
 }
 
 async function finalizeHookPreferredMailboxDispatch(params: {

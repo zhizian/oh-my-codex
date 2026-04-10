@@ -268,6 +268,52 @@ describe('teamCommand shutdown --force parsing', () => {
     assert.equal(force, true);
   });
 
+  it('persists cancelled team mode state on shutdown even when no team mode state existed beforehand', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-team-shutdown-mode-state-'));
+    const previousCwd = process.cwd();
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const logs: string[] = [];
+    const warns: string[] = [];
+
+    try {
+      process.chdir(wd);
+      await mkdir(join(wd, '.omx', 'state'), { recursive: true });
+      await writeFile(
+        join(wd, '.omx', 'state', 'session.json'),
+        JSON.stringify({ session_id: 'sess-team-shutdown-state' }),
+      );
+      await initTeamState(
+        'team-shutdown-mode-state',
+        'persist cancelled team mode state after shutdown',
+        'executor',
+        1,
+        wd,
+      );
+
+      console.log = (...args: unknown[]) => logs.push(args.map(String).join(' '));
+      console.warn = (...args: unknown[]) => warns.push(args.map(String).join(' '));
+
+      await teamCommand(['shutdown', 'team-shutdown-mode-state', '--force']);
+
+      const state = await readModeState('team', wd);
+      assert.ok(state);
+      assert.equal(state?.active, false);
+      assert.equal(state?.current_phase, 'cancelled');
+      assert.equal(state?.team_name, 'team-shutdown-mode-state');
+      assert.equal(warns.length, 0);
+      assert.ok(
+        logs.some((line) =>
+          line.includes('Team shutdown complete: team-shutdown-mode-state')),
+      );
+    } finally {
+      console.log = originalLog;
+      console.warn = originalWarn;
+      process.chdir(previousCwd);
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
   it('parses --confirm-issues from shutdown args', () => {
     const teamArgs = ['shutdown', 'my-team', '--confirm-issues'];
     const confirmIssues = teamArgs.includes('--confirm-issues');
