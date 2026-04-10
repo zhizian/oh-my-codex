@@ -15,6 +15,9 @@ import {
   normalizeAutoNudgeSignatureText,
   resolveAutoNudgeSignature,
 } from './notify-hook/auto-nudge.js';
+import {
+  readScopedJsonIfExists,
+} from './notify-hook/state-io.js';
 import { checkPaneReadyForTeamSendKeys } from './notify-hook/team-tmux-guard.js';
 import {
   checkWorkerPanesAlive,
@@ -787,7 +790,7 @@ async function readRalphProgressGate(
     }
   }
 
-  const hudState = await readJsonObject(join(stateDir, 'hud-state.json'));
+  const hudState = await readScopedJsonIfExists(stateDir, 'hud-state.json', undefined, null);
   if (!hudState || typeof hudState !== 'object') {
     return { allow: false, reason: 'progress_missing', progress_at: '', subagent_session_id: subagentSessionId };
   }
@@ -1197,19 +1200,18 @@ async function readJsonObject(path: string): Promise<Record<string, unknown> | n
 }
 
 async function readAutoNudgeCount(): Promise<number> {
-  const parsed = await readJsonObject(join(stateDir, 'auto-nudge-state.json'));
+  const parsed = await readScopedJsonIfExists(stateDir, 'auto-nudge-state.json', undefined, null);
   return Math.max(0, Math.trunc(asNumber(parsed?.nudgeCount as string | number | undefined, 0)));
 }
 
 async function readAutoNudgeState(): Promise<Record<string, unknown> | null> {
-  return readJsonObject(join(stateDir, 'auto-nudge-state.json'));
+  return readScopedJsonIfExists(stateDir, 'auto-nudge-state.json', undefined, null);
 }
 
 async function runFallbackAutoNudgeTick(): Promise<void> {
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
-  const hudStatePath = join(stateDir, 'hud-state.json');
-  const hudState = await readJsonObject(hudStatePath);
+  const hudState = await readScopedJsonIfExists(stateDir, 'hud-state.json', undefined, null);
 
   lastFallbackAutoNudge = {
     ...lastFallbackAutoNudge,
@@ -1678,8 +1680,8 @@ async function runDispatchDrainTick(): Promise<boolean> {
 
 async function shouldSuppressInteractiveFallbackTicks(): Promise<boolean> {
   const [deepInterviewStateActive, deepInterviewInputLockActive] = await Promise.all([
-    isDeepInterviewStateActive(stateDir),
-    isDeepInterviewInputLockActive(stateDir),
+    isDeepInterviewStateActive(stateDir, undefined),
+    isDeepInterviewInputLockActive(stateDir, undefined),
   ]);
   return deepInterviewStateActive || deepInterviewInputLockActive;
 }

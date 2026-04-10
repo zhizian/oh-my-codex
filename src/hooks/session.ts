@@ -6,9 +6,10 @@
  */
 
 import { readFile, writeFile, mkdir, unlink, appendFile } from 'fs/promises';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { omxStateDir, omxLogsDir } from '../utils/paths.js';
+import { getStateFilePath } from '../mcp/state-paths.js';
 
 export interface SessionState {
   session_id: string;
@@ -37,7 +38,7 @@ function historyPath(cwd: string): string {
  * Reset session-scoped HUD/metrics files at launch so stale values do not leak
  * into a new Codex session.
  */
-export async function resetSessionMetrics(cwd: string): Promise<void> {
+export async function resetSessionMetrics(cwd: string, sessionId?: string): Promise<void> {
   const omxDir = join(cwd, '.omx');
   const stateDir = omxStateDir(cwd);
   await mkdir(omxDir, { recursive: true });
@@ -55,7 +56,9 @@ export async function resetSessionMetrics(cwd: string): Promise<void> {
     weekly_limit_pct: 0,
   }, null, 2));
 
-  await writeFile(join(stateDir, 'hud-state.json'), JSON.stringify({
+  const hudStatePath = getStateFilePath('hud-state.json', cwd, sessionId);
+  await mkdir(dirname(hudStatePath), { recursive: true });
+  await writeFile(hudStatePath, JSON.stringify({
     last_turn_at: now,
     last_progress_at: now,
     turn_count: 0,

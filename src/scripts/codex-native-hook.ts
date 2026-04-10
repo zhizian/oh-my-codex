@@ -17,7 +17,8 @@ import {
   writeTeamLeaderAttention,
   writeTeamPhase,
 } from "../team/state.js";
-import { omxNotepadPath, omxProjectMemoryPath, omxStateDir } from "../utils/paths.js";
+import { omxNotepadPath, omxProjectMemoryPath } from "../utils/paths.js";
+import { getStateFilePath } from "../mcp/state-paths.js";
 import {
   detectKeywords,
   detectPrimaryKeyword,
@@ -66,7 +67,7 @@ export interface NativeHookDispatchResult {
 
 const TERMINAL_RALPH_PHASES = new Set(["complete", "failed", "cancelled"]);
 const TERMINAL_MODE_PHASES = new Set(["complete", "failed", "cancelled"]);
-const SKILL_STOP_BLOCKERS = new Set(["ralplan", "deep-interview"]);
+const SKILL_STOP_BLOCKERS = new Set(["ralplan"]);
 const TEAM_TERMINAL_TASK_STATUSES = new Set(["completed", "failed"]);
 const NATIVE_STOP_STATE_FILE = "native-stop-state.json";
 
@@ -675,40 +676,12 @@ function readPayloadTurnId(payload: CodexHookPayload): string {
   return safeString(payload.turn_id ?? payload.turnId).trim();
 }
 
-async function isDeepInterviewSuppressedForStop(
-  cwd: string,
-  sessionId: string,
-  threadId: string,
-): Promise<boolean> {
-  const scopedModeState = await readStopSessionPinnedState("deep-interview-state.json", cwd, sessionId);
-  if (scopedModeState?.active === true) return true;
-
-  const canonicalState = await readVisibleSkillActiveState(cwd, sessionId);
-  const deepInterviewEntry = canonicalState
-    ? listActiveSkills(canonicalState).find((entry) => (
-      entry.skill === "deep-interview"
-      && matchesSkillStopContext(entry, canonicalState, sessionId, threadId)
-    ))
-    : null;
-  if (
-    deepInterviewEntry
-    && safeObject(canonicalState?.input_lock).active === true
-  ) {
-    return true;
-  }
-
-  return (await readBlockingSkillForStop(cwd, sessionId, threadId, "deep-interview")) !== null;
-}
-
 async function readStopSessionPinnedState(
   fileName: string,
   cwd: string,
   sessionId: string,
 ): Promise<Record<string, unknown> | null> {
-  const stateDir = omxStateDir(cwd);
-  const statePath = sessionId
-    ? join(stateDir, "sessions", sessionId, fileName)
-    : join(stateDir, fileName);
+  const statePath = getStateFilePath(fileName, cwd, sessionId || undefined);
   return readJsonIfExists(statePath);
 }
 
@@ -807,10 +780,6 @@ function buildRepeatableStopSignature(
   ].join("|");
 }
 
-async function readNativeStopState(stateDir: string): Promise<Record<string, unknown>> {
-  return await readJsonIfExists(join(stateDir, NATIVE_STOP_STATE_FILE)) ?? {};
-}
-
 function readNativeStopSessionKey(payload: CodexHookPayload): string {
   return readPayloadSessionId(payload) || readPayloadThreadId(payload) || "global";
 }
@@ -830,7 +799,8 @@ async function persistNativeStopSignature(
   signature: string,
 ): Promise<void> {
   if (!signature) return;
-  const state = await readNativeStopState(stateDir);
+  const statePath = join(stateDir, NATIVE_STOP_STATE_FILE);
+  const state = await readJsonIfExists(statePath) ?? {};
   const sessions = safeObject(state.sessions);
   const sessionKey = readNativeStopSessionKey(payload);
   sessions[sessionKey] = {
@@ -838,7 +808,8 @@ async function persistNativeStopSignature(
     last_signature: signature,
     updated_at: new Date().toISOString(),
   };
-  await writeFile(join(stateDir, NATIVE_STOP_STATE_FILE), JSON.stringify({
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(statePath, JSON.stringify({
     ...state,
     sessions,
   }, null, 2));
@@ -853,7 +824,7 @@ async function maybeReturnRepeatableStopOutput(
   if (!output) return null;
   const stopHookActive = payload.stop_hook_active === true || payload.stopHookActive === true;
   if (stopHookActive) {
-    const state = await readNativeStopState(stateDir);
+    const state = await readJsonIfExists(join(stateDir, NATIVE_STOP_STATE_FILE)) ?? {};
     const previousSignature = readPreviousNativeStopSignature(state, readNativeStopSessionKey(payload));
     if (!signature || previousSignature === signature) {
       return null;
@@ -1074,15 +1045,13 @@ async function buildStopHookOutput(
       if (!stopHookActive && skillOutput) return skillOutput;
     }
 
-    const deepInterviewActive = await isDeepInterviewSuppressedForStop(cwd, sessionId, threadId);
     const lastAssistantMessage = safeString(
       payload.last_assistant_message ?? payload.lastAssistantMessage,
     );
     const autoNudgeConfig = await loadAutoNudgeConfig();
 
     if (
-      !deepInterviewActive
-      && autoNudgeConfig.enabled
+      autoNudgeConfig.enabled
       && detectStallPattern(lastAssistantMessage, autoNudgeConfig.patterns)
     ) {
       const effectiveResponse = resolveEffectiveAutoNudgeResponse(autoNudgeConfig.response);

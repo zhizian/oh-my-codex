@@ -1575,7 +1575,7 @@ esac
     }
   });
 
-  it("returns Stop continuation output for active deep-interview skill with matching active mode state and without active subagents", async () => {
+  it("does not block Stop solely because deep-interview is active", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-stop-deep-interview-"));
     try {
       const stateDir = join(cwd, ".omx", "state");
@@ -1600,13 +1600,7 @@ esac
         { cwd },
       );
 
-      assert.deepEqual(result.outputJson, {
-        decision: "block",
-        reason:
-          "OMX skill deep-interview is still active (phase: planning); continue until the current deep-interview workflow reaches a terminal state.",
-        stopReason: "skill_deep-interview_planning",
-        systemMessage: "OMX skill deep-interview is still active (phase: planning).",
-      });
+      assert.equal(result.outputJson, null);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
@@ -1904,7 +1898,7 @@ esac
     }
   });
 
-  it("suppresses native auto-nudge when only the deep-interview input lock is active", async () => {
+  it("still allows native auto-nudge when deep-interview state is active", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-auto-nudge-deep-interview-lock-"));
     try {
       const stateDir = join(cwd, ".omx", "state");
@@ -1934,7 +1928,7 @@ esac
           session_id: "sess-stop-auto-lock",
           thread_id: "thread-stop-auto-lock",
           turn_id: "turn-stop-auto-lock-1",
-          last_assistant_message: "Would you like me to continue with the next step?",
+          last_assistant_message: "Keep going and finish the cleanup from here.",
         },
         { cwd },
       );
@@ -1942,10 +1936,10 @@ esac
       assert.equal(result.omxEventName, "stop");
       assert.deepEqual(result.outputJson, {
         decision: "block",
-        reason:
-          "OMX skill deep-interview is still active (phase: planning); continue until the current deep-interview workflow reaches a terminal state.",
-        stopReason: "skill_deep-interview_planning",
-        systemMessage: "OMX skill deep-interview is still active (phase: planning).",
+        reason: DEFAULT_AUTO_NUDGE_RESPONSE,
+        stopReason: "auto_nudge",
+        systemMessage:
+          "OMX native Stop detected a stall/permission-style handoff and continued the turn automatically.",
       });
     } finally {
       await rm(cwd, { recursive: true, force: true });

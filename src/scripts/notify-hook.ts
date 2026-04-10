@@ -20,7 +20,7 @@
 
 import { writeFile, appendFile, mkdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 import { safeString, asNumber } from './notify-hook/utils.js';
 import {
@@ -29,7 +29,8 @@ import {
   normalizeInputMessages,
 } from './notify-hook/payload-parser.js';
 import {
-  readJsonIfExists,
+  getScopedStatePath,
+  readScopedJsonIfExists,
   getScopedStateDirsForCurrentSession,
   normalizeNotifyState,
   pruneRecentTurns,
@@ -195,14 +196,17 @@ async function main() {
       const threadId = safeString(payload['thread-id'] || payload.thread_id || '');
       const eventType = safeString(payload.type || 'agent-turn-complete');
       const key = `${threadId || 'no-thread'}|${turnId}|${eventType}`;
-      const dedupeStatePath = join(stateDir, 'notify-hook-state.json');
-      const dedupeState = normalizeNotifyState(await readJsonIfExists(dedupeStatePath, null));
+      const dedupeStatePath = await getScopedStatePath(stateDir, 'notify-hook-state.json', payloadSessionId);
+      const dedupeState = normalizeNotifyState(
+        await readScopedJsonIfExists(stateDir, 'notify-hook-state.json', payloadSessionId, null),
+      );
       dedupeState.recent_turns = pruneRecentTurns(dedupeState.recent_turns, now);
       if (dedupeState.recent_turns[key]) {
         process.exit(0);
       }
       dedupeState.recent_turns[key] = now;
       dedupeState.last_event_at = new Date().toISOString();
+      await mkdir(dirname(dedupeStatePath), { recursive: true }).catch(() => {});
       await writeFile(dedupeStatePath, JSON.stringify(dedupeState, null, 2)).catch(() => {});
     }
   } catch {
@@ -417,18 +421,19 @@ async function main() {
 
   // 4. Write HUD state summary for `omx hud` (lead session only)
   if (!isTeamWorker) {
-    const hudStatePath = join(stateDir, 'hud-state.json');
     try {
-      let hudState = { last_turn_at: '', turn_count: 0 };
-      if (existsSync(hudStatePath)) {
-        hudState = JSON.parse(await readFile(hudStatePath, 'utf-8'));
-      }
+      const hudStatePath = await getScopedStatePath(stateDir, 'hud-state.json', payloadSessionId);
+      let hudState = await readScopedJsonIfExists(stateDir, 'hud-state.json', payloadSessionId, {
+        last_turn_at: '',
+        turn_count: 0,
+      });
       const nowIso = new Date().toISOString();
       hudState.last_turn_at = nowIso;
       (hudState as any).last_progress_at = nowIso;
       hudState.turn_count = (hudState.turn_count || 0) + 1;
       (hudState as any).last_agent_output = (payload['last-assistant-message'] || payload.last_assistant_message || '')
         .slice(0, 100);
+      await mkdir(dirname(hudStatePath), { recursive: true }).catch(() => {});
       await writeFile(hudStatePath, JSON.stringify(hudState, null, 2));
     } catch {
       // Non-critical
@@ -463,7 +468,7 @@ async function main() {
     // Non-fatal: keyword detector module may not be built yet
   }
 
-  const deepInterviewStateActive = await isDeepInterviewStateActive(stateDir);
+  const deepInterviewStateActive = await isDeepInterviewStateActive(stateDir, payloadSessionId);
 
   // 4.55. Notify leader when individual worker transitions to idle (worker session only)
   if (isTeamWorker && parsedTeamWorker && !deepInterviewStateActive) {

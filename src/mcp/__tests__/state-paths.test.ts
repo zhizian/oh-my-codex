@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm } from 'fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve as resolvePath } from 'path';
@@ -10,9 +10,12 @@ import {
   getBaseStateDir,
   getAllSessionScopedStateDirs,
   getAllSessionScopedStatePaths,
+  getReadScopedStateFilePaths,
   resolveWorkingDirectoryForState,
   getStateDir,
+  getStateFilePath,
   getStatePath,
+  validateStateFileName,
   validateStateModeSegment,
   validateSessionId,
 } from '../state-paths.js';
@@ -40,6 +43,19 @@ describe('validateStateModeSegment', () => {
     assert.throws(() => validateStateModeSegment('../evil'), /must not contain "\.\."/);
     assert.throws(() => validateStateModeSegment('foo/bar'), /path separators/);
     assert.throws(() => validateStateModeSegment('foo\\bar'), /path separators/);
+  });
+});
+
+describe('validateStateFileName', () => {
+  it('accepts safe file names', () => {
+    assert.equal(validateStateFileName('hud-state.json'), 'hud-state.json');
+    assert.equal(validateStateFileName('session.json'), 'session.json');
+  });
+
+  it('rejects traversal and path separators', () => {
+    assert.throws(() => validateStateFileName('../evil.json'), /must not contain "\.\."/);
+    assert.throws(() => validateStateFileName('foo/bar.json'), /path separators/);
+    assert.throws(() => validateStateFileName('foo\\bar.json'), /path separators/);
   });
 });
 
@@ -105,6 +121,10 @@ describe('state paths', () => {
     assert.equal(
       getStatePath('ralph', '/repo', 'sess1'),
       '/repo/.omx/state/sessions/sess1/ralph-state.json'
+    );
+    assert.equal(
+      getStateFilePath('hud-state.json', '/repo', 'sess1'),
+      '/repo/.omx/state/sessions/sess1/hud-state.json'
     );
   });
 
@@ -184,6 +204,23 @@ describe('state paths', () => {
 
       const paths = await getAllSessionScopedStatePaths('team', wd);
       assert.deepEqual(paths, [getStatePath('team', wd, 'valid-session')]);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('reads session-sensitive runtime files from the current session without root fallback when requested', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-state-paths-'));
+    try {
+      const stateDir = getBaseStateDir(wd);
+      await mkdir(join(stateDir, 'sessions', 'sess-current'), { recursive: true });
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(join(stateDir, 'session.json'), JSON.stringify({ session_id: 'sess-current' }));
+
+      const paths = await getReadScopedStateFilePaths('hud-state.json', wd, undefined, {
+        rootFallback: false,
+      });
+      assert.deepEqual(paths, [join(stateDir, 'sessions', 'sess-current', 'hud-state.json')]);
     } finally {
       await rm(wd, { recursive: true, force: true });
     }

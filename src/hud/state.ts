@@ -13,7 +13,7 @@ import { omxStateDir } from '../utils/paths.js';
 import { findGitLayout, readGitLayoutFile } from '../utils/git-layout.js';
 import { getDefaultBridge, isBridgeEnabled } from '../runtime/bridge.js';
 import type { RuntimeSnapshot } from '../runtime/bridge.js';
-import { getReadScopedStatePaths } from '../mcp/state-paths.js';
+import { getReadScopedStateFilePaths, getReadScopedStatePaths } from '../mcp/state-paths.js';
 import { listActiveSkills, readVisibleSkillActiveState } from '../state/skill-active.js';
 import type {
   RalphStateForHud,
@@ -168,7 +168,10 @@ export async function readMetrics(cwd: string): Promise<HudMetrics | null> {
 }
 
 export async function readHudNotifyState(cwd: string): Promise<HudNotifyState | null> {
-  return readJsonFile<HudNotifyState>(join(omxStateDir(cwd), 'hud-state.json'));
+  const [hudStatePath] = await getReadScopedStateFilePaths('hud-state.json', cwd, undefined, {
+    rootFallback: false,
+  });
+  return readJsonFile<HudNotifyState>(hudStatePath);
 }
 
 export async function readSessionState(cwd: string): Promise<SessionStateForHud | null> {

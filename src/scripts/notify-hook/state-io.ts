@@ -2,8 +2,9 @@
  * State file I/O helpers for notify-hook modules.
  */
 
-import { readFile, readdir } from 'fs/promises';
-import { join } from 'path';
+import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
+import { dirname, join } from 'path';
+import { existsSync } from 'fs';
 import { asNumber, safeString } from './utils.js';
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -16,18 +17,97 @@ export function readJsonIfExists(path: string, fallback: any): Promise<any> {
     .catch(() => fallback);
 }
 
-export async function getScopedStateDirsForCurrentSession(baseStateDir: string): Promise<string[]> {
+function isSafeStateFileName(fileName: string): boolean {
+  return fileName.length > 0
+    && !fileName.includes('..')
+    && !fileName.includes('/')
+    && !fileName.includes('\\');
+}
+
+export async function readCurrentSessionId(baseStateDir: string): Promise<string | undefined> {
   const sessionPath = join(baseStateDir, 'session.json');
   try {
     const session = JSON.parse(await readFile(sessionPath, 'utf-8'));
     const sessionId = safeString(session && session.session_id ? session.session_id : '');
-    if (SESSION_ID_PATTERN.test(sessionId)) {
-      return [join(baseStateDir, 'sessions', sessionId)];
-    }
+    return SESSION_ID_PATTERN.test(sessionId) ? sessionId : undefined;
   } catch {
-    // No session file or malformed - fall back to global only
+    return undefined;
   }
-  return [baseStateDir];
+}
+
+export async function resolveScopedStateDir(
+  baseStateDir: string,
+  explicitSessionId?: string,
+): Promise<string> {
+  const normalizedExplicit = safeString(explicitSessionId).trim();
+  if (SESSION_ID_PATTERN.test(normalizedExplicit)) {
+    const explicitDir = join(baseStateDir, 'sessions', normalizedExplicit);
+    const currentSessionId = await readCurrentSessionId(baseStateDir);
+    if (currentSessionId === normalizedExplicit || existsSync(explicitDir)) {
+      return explicitDir;
+    }
+  }
+  const currentSessionId = await readCurrentSessionId(baseStateDir);
+  if (currentSessionId) {
+    return join(baseStateDir, 'sessions', currentSessionId);
+  }
+  return baseStateDir;
+}
+
+export async function getScopedStateDirsForCurrentSession(
+  baseStateDir: string,
+  explicitSessionId?: string,
+  options: { includeRootFallback?: boolean } = {},
+): Promise<string[]> {
+  const scopedDir = await resolveScopedStateDir(baseStateDir, explicitSessionId);
+  if (scopedDir === baseStateDir || options.includeRootFallback !== true) {
+    return [scopedDir];
+  }
+  return [scopedDir, baseStateDir];
+}
+
+export async function getScopedStatePath(
+  baseStateDir: string,
+  fileName: string,
+  explicitSessionId?: string,
+): Promise<string> {
+  if (!isSafeStateFileName(fileName)) {
+    throw new Error(`unsafe state file name: ${fileName}`);
+  }
+  return join(await resolveScopedStateDir(baseStateDir, explicitSessionId), fileName);
+}
+
+export async function readScopedJsonIfExists(
+  baseStateDir: string,
+  fileName: string,
+  explicitSessionId: string | undefined,
+  fallback: any,
+  options: { includeRootFallback?: boolean } = {},
+): Promise<any> {
+  if (!isSafeStateFileName(fileName)) {
+    throw new Error(`unsafe state file name: ${fileName}`);
+  }
+  const candidateDirs = await getScopedStateDirsForCurrentSession(
+    baseStateDir,
+    explicitSessionId,
+    options,
+  );
+  for (const dir of candidateDirs) {
+    const value = await readJsonIfExists(join(dir, fileName), fallback);
+    if (value !== fallback) return value;
+  }
+  return fallback;
+}
+
+export async function writeScopedJson(
+  baseStateDir: string,
+  fileName: string,
+  explicitSessionId: string | undefined,
+  value: unknown,
+): Promise<void> {
+  const targetPath = await getScopedStatePath(baseStateDir, fileName, explicitSessionId);
+  await mkdir(dirname(targetPath), { recursive: true });
+  await writeFile(targetPath, JSON.stringify(value, null, 2));
 }
 
 export function normalizeTmuxState(raw: any): any {

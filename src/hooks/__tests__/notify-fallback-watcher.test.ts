@@ -720,7 +720,8 @@ describe('notify-fallback watcher', () => {
         autoNudge: { enabled: true, delaySec: 0, ttlMs: 30_000 },
       }, null, 2));
       await writeSessionStart(wd, 'sess-managed-fallback');
-      await writeFile(join(wd, '.omx', 'state', 'hud-state.json'), JSON.stringify({
+      await mkdir(join(wd, '.omx', 'state', 'sessions', 'sess-managed-fallback'), { recursive: true });
+      await writeFile(join(wd, '.omx', 'state', 'sessions', 'sess-managed-fallback', 'hud-state.json'), JSON.stringify({
         last_turn_at: new Date(Date.now() - 6_000).toISOString(),
         turn_count: 7,
         last_agent_output: 'Keep going and finish the cleanup from here.',
@@ -1286,7 +1287,8 @@ exit 0
         autoNudge: { enabled: true, delaySec: 0, ttlMs: 30_000 },
       }, null, 2));
       await writeSessionStart(wd, 'sess-managed-fallback');
-      await writeFile(join(wd, '.omx', 'state', 'hud-state.json'), JSON.stringify({
+      await mkdir(join(wd, '.omx', 'state', 'sessions', 'sess-managed-fallback'), { recursive: true });
+      await writeFile(join(wd, '.omx', 'state', 'sessions', 'sess-managed-fallback', 'hud-state.json'), JSON.stringify({
         last_turn_at: new Date(Date.now() - 6_000).toISOString(),
         turn_count: 7,
         last_agent_output: 'Keep going and finish the cleanup from here.',
@@ -1345,7 +1347,8 @@ exit 0
         target: { type: 'pane', value: '%42' },
       }, null, 2));
       await writeSessionStart(wd, 'sess-managed-fallback');
-      await writeFile(join(wd, '.omx', 'state', 'hud-state.json'), JSON.stringify({
+      await mkdir(join(wd, '.omx', 'state', 'sessions', 'sess-managed-fallback'), { recursive: true });
+      await writeFile(join(wd, '.omx', 'state', 'sessions', 'sess-managed-fallback', 'hud-state.json'), JSON.stringify({
         last_turn_at: new Date(Date.now() - 6_000).toISOString(),
         turn_count: 7,
         last_agent_output: 'Keep going and finish the cleanup from here.',
@@ -1938,7 +1941,7 @@ exit 0
         owner_omx_session_id: omxSessionId,
         owner_codex_session_id: codexSessionId,
       }, null, 2));
-      await writeFile(join(stateDir, 'hud-state.json'), JSON.stringify({
+      await writeFile(join(stateDir, 'sessions', omxSessionId, 'hud-state.json'), JSON.stringify({
         last_progress_at: new Date(Date.now() - 61_000).toISOString(),
       }, null, 2));
       await writeFile(statePath, JSON.stringify({
@@ -2704,7 +2707,7 @@ exit 0
         current_phase: 'executing',
         tmux_pane_id: '%42',
       }, null, 2));
-      await writeFile(join(stateDir, 'hud-state.json'), JSON.stringify({
+      await writeFile(join(sessionStateDir, 'hud-state.json'), JSON.stringify({
         last_progress_at: new Date(Date.now() - 61_000).toISOString(),
       }, null, 2));
       await writeFile(join(stateDir, 'notify-fallback-state.json'), JSON.stringify({

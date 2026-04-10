@@ -4,11 +4,18 @@
  * automatically send a continuation prompt so the agent keeps working.
  */
 
-import { readFile, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { mkdir, readFile, writeFile } from 'fs/promises';
+import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { asNumber, safeString } from './utils.js';
-import { readJsonIfExists, getScopedStateDirsForCurrentSession, readdir } from './state-io.js';
+import {
+  getScopedStateDirsForCurrentSession,
+  getScopedStatePath,
+  readJsonIfExists,
+  readScopedJsonIfExists,
+  readdir,
+  writeScopedJson,
+} from './state-io.js';
 import { runProcess } from './process-runner.js';
 import { logTmuxHookEvent } from './log.js';
 import { evaluatePaneInjectionReadiness, mapPaneInjectionReadinessReason, sendPaneInput } from './team-tmux-guard.js';
@@ -172,29 +179,30 @@ export function inferSkillPhaseFromText(text, currentPhase = 'planning') {
   return normalizeSkillPhase(currentPhase);
 }
 
-async function loadSkillActiveState(stateDir) {
-  const raw = await readJsonIfExists(join(stateDir, SKILL_ACTIVE_STATE_FILE), null);
+async function loadSkillActiveState(stateDir, sessionId) {
+  const raw = await readScopedJsonIfExists(stateDir, SKILL_ACTIVE_STATE_FILE, sessionId, null);
   return normalizeSkillActiveState(raw);
 }
 
-async function persistSkillActiveState(stateDir, state) {
-  await writeFile(join(stateDir, SKILL_ACTIVE_STATE_FILE), JSON.stringify(state, null, 2)).catch(() => {});
+async function persistSkillActiveState(stateDir, sessionId, state) {
+  await writeScopedJson(stateDir, SKILL_ACTIVE_STATE_FILE, sessionId, state).catch(() => {});
 }
 
 
-export async function isDeepInterviewStateActive(stateDir) {
-  const modeState = await readJsonIfExists(join(stateDir, 'deep-interview-state.json'), null);
+export async function isDeepInterviewStateActive(stateDir, sessionId) {
+  const modeState = await readScopedJsonIfExists(stateDir, 'deep-interview-state.json', sessionId, null);
   return Boolean(modeState && modeState.active === true);
 }
 
-export async function isDeepInterviewInputLockActive(stateDir) {
-  const skillState = await loadSkillActiveState(stateDir);
+export async function isDeepInterviewInputLockActive(stateDir, sessionId) {
+  const skillState = await loadSkillActiveState(stateDir, sessionId);
   return isDeepInterviewAutoApprovalLocked(skillState);
 }
 
 export async function resolveAutoNudgeSignature(stateDir, payload, lastMessage = '') {
   const normalizedMessage = normalizeAutoNudgeSignatureText(lastMessage);
-  const hudState = await readJsonIfExists(join(stateDir, 'hud-state.json'), null);
+  const invocationSessionId = resolveInvocationSessionId(payload);
+  const hudState = await readScopedJsonIfExists(stateDir, 'hud-state.json', invocationSessionId, null);
   const hudTurnAt = safeString(hudState?.last_turn_at).trim();
   const hudTurnCount = Number.isFinite(hudState?.turn_count) ? hudState.turn_count : null;
   const hudMessage = normalizeAutoNudgeSignatureText(hudState?.last_agent_output || hudState?.last_agent_message || '');
@@ -481,7 +489,8 @@ export async function maybeAutoNudge({ cwd, stateDir, logsDir, payload }) {
 
   const lastMessage = safeString(payload['last-assistant-message'] || payload.last_assistant_message || '');
   const latestUserInput = latestUserInputFromPayload(payload);
-  let skillState = await loadSkillActiveState(stateDir);
+  const invocationSessionId = resolveInvocationSessionId(payload);
+  let skillState = await loadSkillActiveState(stateDir, invocationSessionId);
   let releaseReason = null;
 
   try {
@@ -491,11 +500,11 @@ export async function maybeAutoNudge({ cwd, stateDir, logsDir, payload }) {
       skillState.active = inferredPhase !== 'completing';
       skillState.updated_at = new Date().toISOString();
       releaseReason = inferDeepInterviewReleaseReason({ skillState, latestUserInput, lastMessage });
-      await persistSkillActiveState(stateDir, skillState);
+      await persistSkillActiveState(stateDir, invocationSessionId, skillState);
     }
 
-    const nudgeStatePath = join(stateDir, 'auto-nudge-state.json');
-    let nudgeState = await readJsonIfExists(nudgeStatePath, null);
+    const nudgeStatePath = await getScopedStatePath(stateDir, 'auto-nudge-state.json', invocationSessionId);
+    let nudgeState = await readScopedJsonIfExists(stateDir, 'auto-nudge-state.json', invocationSessionId, null);
     if (!nudgeState || typeof nudgeState !== 'object') {
       nudgeState = { nudgeCount: 0, lastNudgeAt: '', lastSignature: '', lastSemanticSignature: '' };
     }
@@ -554,6 +563,7 @@ export async function maybeAutoNudge({ cwd, stateDir, logsDir, payload }) {
     if (!isFallbackWatcherSource && config.stallMs > 0) {
       nudgeState.pendingSignature = signature;
       nudgeState.pendingSince = new Date().toISOString();
+      await mkdir(dirname(nudgeStatePath), { recursive: true }).catch(() => {});
       await writeFile(nudgeStatePath, JSON.stringify(nudgeState, null, 2)).catch(() => {});
       await logTmuxHookEvent(logsDir, {
         timestamp: new Date().toISOString(),
@@ -621,6 +631,7 @@ export async function maybeAutoNudge({ cwd, stateDir, logsDir, payload }) {
       nudgeState.lastSemanticSignature = semanticSignature;
       nudgeState.pendingSignature = '';
       nudgeState.pendingSince = '';
+      await mkdir(dirname(nudgeStatePath), { recursive: true }).catch(() => {});
       await writeFile(nudgeStatePath, JSON.stringify(nudgeState, null, 2)).catch(() => {});
 
       await logTmuxHookEvent(logsDir, {
@@ -642,7 +653,7 @@ export async function maybeAutoNudge({ cwd, stateDir, logsDir, payload }) {
   } finally {
     if (releaseReason && skillState && isDeepInterviewAutoApprovalLocked(skillState)) {
       releaseDeepInterviewInputLock(skillState, releaseReason, new Date().toISOString());
-      await persistSkillActiveState(stateDir, skillState).catch(() => {});
+      await persistSkillActiveState(stateDir, invocationSessionId, skillState).catch(() => {});
     }
   }
 }

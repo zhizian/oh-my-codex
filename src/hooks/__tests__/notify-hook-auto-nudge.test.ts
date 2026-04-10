@@ -211,6 +211,8 @@ describe('notify-hook auto-nudge', () => {
       await chmod(join(fakeBinDir, 'tmux'), 0o755);
 
       await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
 
       const result = runNotifyHook(cwd, fakeBinDir, codexHome, {
         'last-assistant-message': 'I analyzed the code. Keep going and finish the focused cleanup.',
@@ -220,7 +222,7 @@ describe('notify-hook auto-nudge', () => {
       const tmuxLog = await readFile(tmuxLogPath, 'utf-8').catch(() => '');
       assert.doesNotMatch(tmuxLog, defaultAutoNudgePattern('%99'));
 
-      const nudgeState = JSON.parse(await readFile(join(stateDir, 'auto-nudge-state.json'), 'utf-8'));
+      const nudgeState = JSON.parse(await readFile(join(sessionStateDir, 'auto-nudge-state.json'), 'utf-8'));
       assert.equal(nudgeState.nudgeCount, 0);
       assert.ok(nudgeState.pendingSignature);
       assert.ok(nudgeState.pendingSince);
@@ -701,6 +703,9 @@ exit 0
       await writeJson(join(codexHome, '.omx-config.json'), {
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0 },
       });
+      await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
 
       await writeFile(join(fakeBinDir, 'tmux'), buildFakeTmux(tmuxLogPath));
       await chmod(join(fakeBinDir, 'tmux'), 0o755);
@@ -1012,6 +1017,9 @@ exit 0
       await writeJson(join(codexHome, '.omx-config.json'), {
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0, ttlMs: 0 },
       });
+      await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
 
       await writeFile(join(fakeBinDir, 'tmux'), buildFakeTmux(tmuxLogPath));
       await chmod(join(fakeBinDir, 'tmux'), 0o755);
@@ -1032,7 +1040,7 @@ exit 0
       const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
       assert.equal((tmuxLog.match(new RegExp(defaultAutoNudgePattern('%99').source, 'g')) || []).length, 1);
 
-      const nudgeState = JSON.parse(await readFile(join(stateDir, 'auto-nudge-state.json'), 'utf-8'));
+      const nudgeState = JSON.parse(await readFile(join(sessionStateDir, 'auto-nudge-state.json'), 'utf-8'));
       assert.equal(nudgeState.nudgeCount, 1);
       assert.match(nudgeState.lastSignature, /^hud:1\|.*\|stall:proceed_intent$/);
     });
@@ -1055,6 +1063,9 @@ exit 0
       await writeJson(join(codexHome, '.omx-config.json'), {
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0, ttlMs: 5000 },
       });
+      await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
 
       await writeFile(join(fakeBinDir, 'tmux'), buildFakeTmux(tmuxLogPath));
       await chmod(join(fakeBinDir, 'tmux'), 0o755);
@@ -1074,7 +1085,7 @@ exit 0
       let tmuxLog = await readFile(tmuxLogPath, 'utf-8');
       assert.equal((tmuxLog.match(new RegExp(defaultAutoNudgePattern('%99').source, 'g')) || []).length, 1);
 
-      const nudgeStatePath = join(stateDir, 'auto-nudge-state.json');
+      const nudgeStatePath = join(sessionStateDir, 'auto-nudge-state.json');
       const nudgeStateBeforeThird = JSON.parse(await readFile(nudgeStatePath, 'utf-8'));
       await writeJson(nudgeStatePath, {
         ...nudgeStateBeforeThird,
@@ -1115,7 +1126,10 @@ exit 0
       await writeJson(join(codexHome, '.omx-config.json'), {
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0, ttlMs: 5000 },
       });
-      await writeJson(join(stateDir, 'hud-state.json'), {
+      await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
+      await writeJson(join(sessionStateDir, 'hud-state.json'), {
         last_turn_at: lastTurnAt,
         turn_count: 1,
         last_agent_output: lastMessage,
@@ -1130,7 +1144,7 @@ exit 0
       });
       assert.equal(first.status, 0, `first hook failed: ${first.stderr || first.stdout}`);
 
-      const nudgeStatePath = join(stateDir, 'auto-nudge-state.json');
+      const nudgeStatePath = join(sessionStateDir, 'auto-nudge-state.json');
       const firstState = JSON.parse(await readFile(nudgeStatePath, 'utf-8'));
       await writeJson(nudgeStatePath, {
         ...firstState,
@@ -1171,6 +1185,7 @@ exit 0
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0, ttlMs: 0 },
       });
       await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
 
       await writeFile(join(fakeBinDir, 'tmux'), buildFakeTmux(tmuxLogPath));
       await chmod(join(fakeBinDir, 'tmux'), 0o755);
@@ -1192,10 +1207,10 @@ exit 0
       const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
       assert.equal((tmuxLog.match(new RegExp(defaultAutoNudgePattern('%99').source, 'g')) || []).length, 1);
 
-      const hudState = JSON.parse(await readFile(join(stateDir, 'hud-state.json'), 'utf-8'));
+      const hudState = JSON.parse(await readFile(join(sessionStateDir, 'hud-state.json'), 'utf-8'));
       assert.equal(hudState.turn_count, 1);
 
-      const nudgeState = JSON.parse(await readFile(join(stateDir, 'auto-nudge-state.json'), 'utf-8'));
+      const nudgeState = JSON.parse(await readFile(join(sessionStateDir, 'auto-nudge-state.json'), 'utf-8'));
       assert.equal(nudgeState.nudgeCount, 1);
       assert.match(nudgeState.lastSignature, /^hud:1\|.*\|stall:proceed_intent$/);
     });
@@ -1249,6 +1264,9 @@ exit 0
       await writeJson(join(codexHome, '.omx-config.json'), {
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0 },
       });
+      await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
 
       await writeFile(join(fakeBinDir, 'tmux'), buildFakeTmux(tmuxLogPath));
       await chmod(join(fakeBinDir, 'tmux'), 0o755);
@@ -1258,7 +1276,7 @@ exit 0
       });
       assert.equal(result.status, 0, `hook failed: ${result.stderr || result.stdout}`);
 
-      const nudgeStatePath = join(stateDir, 'auto-nudge-state.json');
+      const nudgeStatePath = join(sessionStateDir, 'auto-nudge-state.json');
       assert.ok(existsSync(nudgeStatePath), 'auto-nudge-state.json should be created');
       const nudgeState = JSON.parse(await readFile(nudgeStatePath, 'utf-8'));
       assert.equal(nudgeState.nudgeCount, 1, 'nudge count should be 1');
@@ -1360,7 +1378,10 @@ exit 0
       await writeJson(join(codexHome, '.omx-config.json'), {
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0 },
       });
-      await writeJson(join(stateDir, 'skill-active-state.json'), {
+      await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
+      await writeJson(join(sessionStateDir, 'skill-active-state.json'), {
         version: 1,
         active: true,
         skill: 'deep-interview',
@@ -1603,7 +1624,10 @@ exit 0
       await writeJson(join(codexHome, '.omx-config.json'), {
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0 },
       });
-      await writeJson(join(stateDir, 'skill-active-state.json'), {
+      await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
+      await writeJson(join(sessionStateDir, 'skill-active-state.json'), {
         version: 1,
         active: true,
         skill: 'deep-interview',
@@ -1628,7 +1652,7 @@ exit 0
       });
       assert.equal(result.status, 0, `hook failed: ${result.stderr || result.stdout}`);
 
-      const skillState = JSON.parse(await readFile(join(stateDir, 'skill-active-state.json'), 'utf-8')) as {
+      const skillState = JSON.parse(await readFile(join(sessionStateDir, 'skill-active-state.json'), 'utf-8')) as {
         active: boolean;
         phase: string;
         input_lock?: { active: boolean; released_at?: string; exit_reason?: string };
@@ -1657,7 +1681,10 @@ exit 0
       await writeJson(join(codexHome, '.omx-config.json'), {
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0 },
       });
-      await writeJson(join(stateDir, 'skill-active-state.json'), {
+      await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
+      await writeJson(join(sessionStateDir, 'skill-active-state.json'), {
         version: 1,
         active: true,
         skill: 'deep-interview',
@@ -1682,7 +1709,7 @@ exit 0
       });
       assert.equal(result.status, 0, `hook failed: ${result.stderr || result.stdout}`);
 
-      const skillState = JSON.parse(await readFile(join(stateDir, 'skill-active-state.json'), 'utf-8')) as {
+      const skillState = JSON.parse(await readFile(join(sessionStateDir, 'skill-active-state.json'), 'utf-8')) as {
         active: boolean;
         phase: string;
         input_lock?: { active: boolean; released_at?: string; exit_reason?: string };
@@ -1711,7 +1738,10 @@ exit 0
       await writeJson(join(codexHome, '.omx-config.json'), {
         autoNudge: { enabled: true, delaySec: 0, stallMs: 0 },
       });
-      await writeJson(join(stateDir, 'skill-active-state.json'), {
+      await writeManagedSessionState(stateDir, cwd);
+      const sessionStateDir = join(stateDir, 'sessions', 'sess-managed');
+      await mkdir(sessionStateDir, { recursive: true });
+      await writeJson(join(sessionStateDir, 'skill-active-state.json'), {
         version: 1,
         active: true,
         skill: 'deep-interview',
@@ -1737,7 +1767,7 @@ exit 0
       });
       assert.equal(result.status, 0, `hook failed: ${result.stderr || result.stdout}`);
 
-      const skillState = JSON.parse(await readFile(join(stateDir, 'skill-active-state.json'), 'utf-8')) as {
+      const skillState = JSON.parse(await readFile(join(sessionStateDir, 'skill-active-state.json'), 'utf-8')) as {
         skill: string;
         active: boolean;
         phase: string;

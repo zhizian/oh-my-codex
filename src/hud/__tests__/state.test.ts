@@ -7,6 +7,7 @@ import {
   buildGitBranchLabel,
   readGitBranch,
   readAllState,
+  readHudNotifyState,
   readRalphState,
   readRalplanState,
   readDeepInterviewState,
@@ -318,6 +319,21 @@ describe('additional HUD mode state readers', () => {
     await withTempRepo('omx-hud-ultraqa-', async (cwd) => {
       await writeModeState(cwd, 'ultraqa', { active: true, current_phase: 'diagnose' });
       assert.deepEqual(await readUltraqaState(cwd), { active: true, current_phase: 'diagnose' });
+    });
+  });
+
+  it('reads hud notify state from the current session scope', async () => {
+    await withTempRepo('omx-hud-notify-session-', async (cwd) => {
+      const rootStateDir = join(cwd, '.omx', 'state');
+      const sessionId = 'sess-hud-notify';
+      const sessionStateDir = join(rootStateDir, 'sessions', sessionId);
+      await mkdir(sessionStateDir, { recursive: true });
+      await writeFile(join(rootStateDir, 'session.json'), JSON.stringify({ session_id: sessionId }));
+      await writeFile(join(rootStateDir, 'hud-state.json'), JSON.stringify({ last_turn_at: 'root', turn_count: 99 }));
+      await writeFile(join(sessionStateDir, 'hud-state.json'), JSON.stringify({ last_turn_at: 'session', turn_count: 2 }));
+
+      const state = await readHudNotifyState(cwd);
+      assert.deepEqual(state, { last_turn_at: 'session', turn_count: 2 });
     });
   });
 });

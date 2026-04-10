@@ -5,6 +5,7 @@ import { readdir, readFile } from 'fs/promises';
 export const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 export const STATE_MODE_SEGMENT_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const STATE_FILE_SUFFIX = '-state.json';
+const STATE_FILE_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const WORKDIR_ALLOWLIST_ENV = 'OMX_MCP_WORKDIR_ROOTS';
 
 export type StateFileScope = 'root' | 'session';
@@ -48,6 +49,26 @@ export function validateStateModeSegment(mode: unknown): string {
 
 function getStateFilename(mode: string): string {
   return `${validateStateModeSegment(mode)}${STATE_FILE_SUFFIX}`;
+}
+
+export function validateStateFileName(fileName: unknown): string {
+  if (typeof fileName !== 'string') {
+    throw new Error('fileName must be a string');
+  }
+  const normalized = fileName.trim();
+  if (!normalized) {
+    throw new Error('fileName must be a non-empty string');
+  }
+  if (normalized.includes('..')) {
+    throw new Error('fileName must not contain ".."');
+  }
+  if (normalized.includes('/') || normalized.includes('\\')) {
+    throw new Error('fileName must not contain path separators');
+  }
+  if (!STATE_FILE_NAME_PATTERN.test(normalized)) {
+    throw new Error('fileName must match ^[A-Za-z0-9._-]{1,128}$');
+  }
+  return normalized;
 }
 
 function convertWindowsToWslPath(raw: string): string {
@@ -155,6 +176,10 @@ export function getStatePath(mode: string, workingDirectory?: string, sessionId?
   return join(getStateDir(workingDirectory, sessionId), getStateFilename(mode));
 }
 
+export function getStateFilePath(fileName: string, workingDirectory?: string, sessionId?: string): string {
+  return join(getStateDir(workingDirectory, sessionId), validateStateFileName(fileName));
+}
+
 export type StateScopeSource = 'explicit' | 'session' | 'root';
 
 export interface ResolvedStateScope {
@@ -229,6 +254,26 @@ export async function getReadScopedStatePaths(
   const dirs = await getReadScopedStateDirs(workingDirectory, explicitSessionId);
   const fileName = getStateFilename(mode);
   return dirs.map((dir) => join(dir, fileName));
+}
+
+export async function getReadScopedStateFilePaths(
+  fileName: string,
+  workingDirectory?: string,
+  explicitSessionId?: string,
+  options: { rootFallback?: boolean } = {},
+): Promise<string[]> {
+  const normalizedFileName = validateStateFileName(fileName);
+  const scope = await resolveStateScope(workingDirectory, explicitSessionId);
+  if (scope.source === 'root') {
+    return [join(scope.stateDir, normalizedFileName)];
+  }
+  if (options.rootFallback === false) {
+    return [join(scope.stateDir, normalizedFileName)];
+  }
+  return [
+    join(scope.stateDir, normalizedFileName),
+    join(getBaseStateDir(workingDirectory), normalizedFileName),
+  ];
 }
 
 export async function getAllSessionScopedStatePaths(

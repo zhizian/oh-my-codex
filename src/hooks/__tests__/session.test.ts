@@ -62,6 +62,25 @@ describe('session lifecycle manager', () => {
     }
   });
 
+  it('writes hud session metrics into the active session scope when session id is provided', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-session-metrics-scoped-'));
+    try {
+      await resetSessionMetrics(cwd, 'sess-scoped');
+
+      const metricsPath = join(cwd, '.omx', 'metrics.json');
+      const hudPath = join(cwd, '.omx', 'state', 'sessions', 'sess-scoped', 'hud-state.json');
+      assert.equal(existsSync(metricsPath), true);
+      assert.equal(existsSync(hudPath), true);
+
+      const hud = JSON.parse(await readFile(hudPath, 'utf-8')) as {
+        turn_count: number;
+      };
+      assert.equal(hud.turn_count, 0);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('writes session start/end lifecycle artifacts and archives session history', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'omx-session-lifecycle-'));
     const sessionId = 'sess-lifecycle-1';

@@ -2162,7 +2162,7 @@ ${launchAppendix}`
   await writeSessionModelInstructionsFile(cwd, sessionId, sessionInstructions);
 
   // 3. Write session state
-  await resetSessionMetrics(cwd);
+  await resetSessionMetrics(cwd, sessionId);
   await writeSessionStart(cwd, sessionId);
 
   // 4. Start notify fallback watcher (best effort)
