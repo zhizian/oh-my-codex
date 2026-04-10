@@ -1187,6 +1187,14 @@ case "\${1:-}" in
   split-window)
     case "$*" in
       *" -h "*)
+        mkdir -p "${cwd}/.omx/state/team/team-pane-pid/workers/worker-1"
+        cat > "${cwd}/.omx/state/team/team-pane-pid/workers/worker-1/status.json" <<'EOF'
+{
+  "state": "working",
+  "current_task_id": "1",
+  "updated_at": "2026-04-10T00:00:00.000Z"
+}
+EOF
         echo "%2"
         ;;
       *)
