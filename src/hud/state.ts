@@ -414,7 +414,12 @@ export async function readAllState(cwd: string, config: ResolvedHudConfig = DEFA
   const team = canonicalSkills.has('team') || useCompatibilityFallback
     ? mergePhase(teamDetail?.active === true ? teamDetail : null, canonicalPhaseForSkill(canonicalSkills, 'team'))
     : null;
-  const autoresearch = autoresearchDetail?.active === true ? autoresearchDetail : null;
+  const autoresearch = canonicalSkills.has('autoresearch') || useCompatibilityFallback
+    ? mergePhase(
+      autoresearchDetail?.active === true ? autoresearchDetail : null,
+      canonicalPhaseForSkill(canonicalSkills, 'autoresearch'),
+    )
+    : null;
 
   // When the Rust runtime bridge is enabled, prefer Rust-authored snapshot
   // for authority/backlog/readiness display over JS-inferred state.

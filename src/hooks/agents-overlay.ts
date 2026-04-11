@@ -224,7 +224,6 @@ async function readActiveModes(
     try {
       if (
         !useCompatibilityFallback &&
-        ref.mode !== "autoresearch" &&
         !canonicalSkills.has(ref.mode)
       ) {
         continue;

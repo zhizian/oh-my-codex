@@ -778,6 +778,46 @@ describe('state-server directory initialization', () => {
     }
   });
 
+  it('does not auto-complete existing workflow state when tracked write validation fails', async () => {
+    process.env.OMX_STATE_SERVER_DISABLE_AUTO_START = '1';
+    const { handleStateToolCall } = await import('../state-server.js');
+
+    const wd = await mkdtemp(join(tmpdir(), 'omx-state-server-validate-before-transition-'));
+    try {
+      await mkdir(join(wd, '.omx', 'state', 'sessions', 'sess-invalid'), { recursive: true });
+      await writeFile(
+        join(wd, '.omx', 'state', 'sessions', 'sess-invalid', 'ralplan-state.json'),
+        JSON.stringify({ active: true, mode: 'ralplan', current_phase: 'planning' }, null, 2),
+      );
+
+      const denied = await handleStateToolCall({
+        params: {
+          name: 'state_write',
+          arguments: {
+            workingDirectory: wd,
+            session_id: 'sess-invalid',
+            mode: 'ralph',
+            active: true,
+            current_phase: 'definitely-invalid',
+          },
+        },
+      });
+
+      assert.equal(denied.isError, true);
+      const body = JSON.parse(denied.content[0]?.text || '{}') as { error?: string };
+      assert.match(body.error || '', /ralph\.current_phase/i);
+
+      const ralplanState = JSON.parse(
+        await readFile(join(wd, '.omx', 'state', 'sessions', 'sess-invalid', 'ralplan-state.json'), 'utf-8'),
+      ) as Record<string, unknown>;
+      assert.equal(ralplanState.active, true);
+      assert.equal(ralplanState.current_phase, 'planning');
+      assert.equal(existsSync(join(wd, '.omx', 'state', 'sessions', 'sess-invalid', 'ralph-state.json')), false);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
   it('allows ultrawork overlap with any tracked mode', async () => {
     process.env.OMX_STATE_SERVER_DISABLE_AUTO_START = '1';
     const { handleStateToolCall } = await import('../state-server.js');

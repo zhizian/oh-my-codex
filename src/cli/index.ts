@@ -46,6 +46,8 @@ import {
   getStateDir,
   listModeStateFilesWithScopePreference,
 } from "../mcp/state-paths.js";
+import { SKILL_ACTIVE_STATE_MODE, syncCanonicalSkillStateForMode } from "../state/skill-active.js";
+import { isTrackedWorkflowMode } from "../state/workflow-transition.js";
 import { maybeCheckAndPromptUpdate } from "./update.js";
 import { maybePromptGithubStar } from "./star-prompt.js";
 import {
@@ -2036,6 +2038,19 @@ function buildRecoveredPostLaunchModeState(
   };
 }
 
+function buildRecoveredPostLaunchSkillActiveState(
+  completedAt: string,
+): Record<string, unknown> {
+  return {
+    version: 1,
+    active: false,
+    skill: "",
+    phase: "complete",
+    updated_at: completedAt,
+    active_skills: [],
+  };
+}
+
 export async function cleanupPostLaunchModeStateFiles(
   cwd: string,
   sessionId: string,
@@ -2062,8 +2077,25 @@ export async function cleanupPostLaunchModeStateFiles(
             const completedAt = now().toISOString();
             await writeFile(
               path,
-              JSON.stringify(buildRecoveredPostLaunchModeState(mode, completedAt), null, 2),
+              JSON.stringify(
+                mode === SKILL_ACTIVE_STATE_MODE
+                  ? buildRecoveredPostLaunchSkillActiveState(completedAt)
+                  : buildRecoveredPostLaunchModeState(mode, completedAt),
+                null,
+                2,
+              ),
             );
+            if (isTrackedWorkflowMode(mode)) {
+              await syncCanonicalSkillStateForMode({
+                cwd,
+                mode,
+                active: false,
+                currentPhase: "cancelled",
+                sessionId: stateDir === getStateDir(cwd, sessionId) ? sessionId : undefined,
+                nowIso: completedAt,
+                source: "postLaunchCleanup",
+              });
+            }
           } catch (err) {
             writeWarn(
               `[omx] postLaunch: failed to recover mode state ${path}: ${err instanceof Error ? err.message : err}`,
@@ -2076,12 +2108,36 @@ export async function cleanupPostLaunchModeStateFiles(
         }
         continue;
       }
-      if (result.state.active !== true) continue;
+      const skillStateStillVisible = mode === SKILL_ACTIVE_STATE_MODE
+        && Array.isArray(result.state.active_skills)
+        && result.state.active_skills.length > 0;
+      if (result.state.active !== true && !skillStateStillVisible) continue;
 
       try {
+        const completedAt = now().toISOString();
+        if (mode === SKILL_ACTIVE_STATE_MODE) {
+          result.state.active = false;
+          result.state.phase = "complete";
+          result.state.updated_at = completedAt;
+          result.state.active_skills = [];
+          await writeFile(path, JSON.stringify(result.state, null, 2));
+          continue;
+        }
         result.state.active = false;
-        result.state.completed_at = now().toISOString();
+        result.state.current_phase = "cancelled";
+        result.state.completed_at = completedAt;
         await writeFile(path, JSON.stringify(result.state, null, 2));
+        if (isTrackedWorkflowMode(mode)) {
+          await syncCanonicalSkillStateForMode({
+            cwd,
+            mode,
+            active: false,
+            currentPhase: "cancelled",
+            sessionId: stateDir === getStateDir(cwd, sessionId) ? sessionId : undefined,
+            nowIso: completedAt,
+            source: "postLaunchCleanup",
+          });
+        }
       } catch (err) {
         writeWarn(
           `[omx] postLaunch: failed to update mode state ${path}: ${err instanceof Error ? err.message : err}`,

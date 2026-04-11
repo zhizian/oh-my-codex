@@ -166,6 +166,37 @@ describe('state operations directory initialization', () => {
     }
   });
 
+  it('writes and reads autoresearch state', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-state-ops-autoresearch-'));
+    try {
+      const writeResponse = await executeStateOperation('state_write', {
+        workingDirectory: wd,
+        mode: 'autoresearch',
+        active: true,
+        current_phase: 'running',
+      });
+
+      assert.equal(writeResponse.isError, undefined);
+      assert.deepEqual(writeResponse.payload, {
+        success: true,
+        mode: 'autoresearch',
+        path: join(wd, '.omx', 'state', 'autoresearch-state.json'),
+      });
+
+      const readResponse = await executeStateOperation('state_read', {
+        workingDirectory: wd,
+        mode: 'autoresearch',
+      });
+
+      assert.equal(readResponse.isError, undefined);
+      const readBody = readResponse.payload as Record<string, unknown>;
+      assert.equal(readBody.active, true);
+      assert.equal(readBody.current_phase, 'running');
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
   it('creates session-scoped state directory when session_id is provided', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-state-ops-session-'));
     try {
@@ -205,6 +236,118 @@ describe('state operations directory initialization', () => {
       for (let i = 0; i < 16; i++) {
         assert.equal(state[`k${i}`], i);
       }
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('syncs canonical skill-active state for tracked mode writes and clears', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-state-ops-canonical-'));
+    try {
+      await executeStateOperation('state_write', {
+        workingDirectory: wd,
+        session_id: 'sess-sync',
+        mode: 'autoresearch',
+        active: true,
+        current_phase: 'running',
+      });
+
+      const canonicalPath = join(wd, '.omx', 'state', 'sessions', 'sess-sync', 'skill-active-state.json');
+      const canonical = JSON.parse(await readFile(canonicalPath, 'utf-8')) as {
+        active_skills?: Array<{
+          skill: string;
+          phase?: string;
+          session_id?: string;
+          activated_at?: string;
+          updated_at?: string;
+        }>;
+      };
+      assert.deepEqual(canonical.active_skills, [{
+        skill: 'autoresearch',
+        phase: 'running',
+        active: true,
+        activated_at: canonical.active_skills?.[0]?.activated_at,
+        updated_at: canonical.active_skills?.[0]?.updated_at,
+        session_id: 'sess-sync',
+      }]);
+
+      await executeStateOperation('state_clear', {
+        workingDirectory: wd,
+        session_id: 'sess-sync',
+        mode: 'autoresearch',
+      });
+
+      const cleared = JSON.parse(await readFile(canonicalPath, 'utf-8')) as {
+        active: boolean;
+        active_skills?: unknown[];
+      };
+      assert.equal(cleared.active, false);
+      assert.deepEqual(cleared.active_skills, []);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('denies unsupported overlaps without writing the requested mode state', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-state-ops-deny-overlap-'));
+    try {
+      const existing = await executeStateOperation('state_write', {
+        workingDirectory: wd,
+        session_id: 'sess-deny',
+        mode: 'team',
+        active: true,
+        current_phase: 'running',
+      });
+      assert.equal(existing.isError, undefined);
+
+      const denied = await executeStateOperation('state_write', {
+        workingDirectory: wd,
+        session_id: 'sess-deny',
+        mode: 'autopilot',
+        active: true,
+        current_phase: 'planning',
+      });
+
+      assert.equal(denied.isError, true);
+      assert.match(String((denied.payload as { error?: string }).error || ''), /Unsupported workflow overlap: team \+ autopilot\./);
+      assert.equal(existsSync(join(wd, '.omx', 'state', 'sessions', 'sess-deny', 'autopilot-state.json')), false);
+
+      const canonical = JSON.parse(
+        await readFile(join(wd, '.omx', 'state', 'sessions', 'sess-deny', 'skill-active-state.json'), 'utf-8'),
+      ) as { active_skills?: Array<{ skill: string }> };
+      assert.deepEqual(canonical.active_skills?.map((entry) => entry.skill), ['team']);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('does not auto-complete existing workflow state when tracked write validation fails', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-state-ops-validate-before-transition-'));
+    try {
+      const sessionDir = join(wd, '.omx', 'state', 'sessions', 'sess-invalid');
+      await mkdir(sessionDir, { recursive: true });
+      await writeFile(
+        join(sessionDir, 'ralplan-state.json'),
+        JSON.stringify({ active: true, mode: 'ralplan', current_phase: 'planning' }, null, 2),
+      );
+
+      const denied = await executeStateOperation('state_write', {
+        workingDirectory: wd,
+        session_id: 'sess-invalid',
+        mode: 'ralph',
+        active: true,
+        current_phase: 'definitely-invalid',
+      });
+
+      assert.equal(denied.isError, true);
+      assert.match(String((denied.payload as { error?: string }).error || ''), /ralph\.current_phase/i);
+
+      const ralplanState = JSON.parse(
+        await readFile(join(sessionDir, 'ralplan-state.json'), 'utf-8'),
+      ) as Record<string, unknown>;
+      assert.equal(ralplanState.active, true);
+      assert.equal(ralplanState.current_phase, 'planning');
+      assert.equal(existsSync(join(sessionDir, 'ralph-state.json')), false);
     } finally {
       await rm(wd, { recursive: true, force: true });
     }

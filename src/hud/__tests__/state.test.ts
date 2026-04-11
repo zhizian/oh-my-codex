@@ -469,4 +469,33 @@ describe('readAllState canonical skill precedence', () => {
       });
     });
   });
+
+  it('suppresses stale autoresearch detail when canonical session skill state excludes it', async () => {
+    await withTempRepo('omx-hud-canonical-autoresearch-', async (cwd) => {
+      const rootStateDir = join(cwd, '.omx', 'state');
+      const sessionId = 'sess-autoresearch-off';
+      const sessionDir = join(rootStateDir, 'sessions', sessionId);
+      await mkdir(sessionDir, { recursive: true });
+      await writeFile(join(rootStateDir, 'session.json'), JSON.stringify({ session_id: sessionId }));
+      await writeFile(join(rootStateDir, 'autoresearch-state.json'), JSON.stringify({
+        active: true,
+        current_phase: 'running',
+      }));
+      await writeFile(join(sessionDir, 'skill-active-state.json'), JSON.stringify({
+        active: true,
+        skill: 'team',
+        phase: 'running',
+        session_id: sessionId,
+        active_skills: [{ skill: 'team', phase: 'running', active: true, session_id: sessionId }],
+      }));
+      await writeFile(join(sessionDir, 'team-state.json'), JSON.stringify({
+        active: true,
+        team_name: 'gamma',
+      }));
+
+      const state = await readAllState(cwd);
+      assert.equal(state.autoresearch, null);
+      assert.deepEqual(state.team, { active: true, team_name: 'gamma', current_phase: 'running' });
+    });
+  });
 });

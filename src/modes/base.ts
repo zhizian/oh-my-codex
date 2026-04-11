@@ -201,6 +201,16 @@ export async function updateModeState(
     : updatedBase;
   const updated = withModeRuntimeContext(current, normalizedBase) as ModeState;
   await writeFile(getStatePath(mode, projectRoot, scope.sessionId), JSON.stringify(updated, null, 2));
+  if (isTrackedWorkflowMode(mode)) {
+    await syncCanonicalSkillStateForMode({
+      cwd: projectRoot ?? process.cwd(),
+      mode,
+      active: updated.active === true,
+      currentPhase: typeof updated.current_phase === 'string' ? updated.current_phase : undefined,
+      sessionId: scope.sessionId,
+      source: 'updateModeState',
+    });
+  }
   return updated;
 }
 

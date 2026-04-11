@@ -430,6 +430,35 @@ describe("resolveSessionOrchestrationMode", () => {
     assert.ok(overlay.includes("- team: phase: running"));
     assert.equal(overlay.includes("ralph"), false);
   });
+
+  it("active mode summary suppresses stale autoresearch mode files when canonical session skill state excludes it", async () => {
+    const sessionId = "sess-autoresearch-summary";
+    const rootStateDir = join(tempDir, ".omx", "state");
+    const sessionDir = join(rootStateDir, "sessions", sessionId);
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(rootStateDir, "autoresearch-state.json"),
+      JSON.stringify({ active: true, current_phase: "running" }),
+    );
+    await writeFile(
+      join(sessionDir, "skill-active-state.json"),
+      JSON.stringify({
+        active: true,
+        skill: "team",
+        phase: "running",
+        session_id: sessionId,
+        active_skills: [{ skill: "team", phase: "running", active: true, session_id: sessionId }],
+      }),
+    );
+    await writeFile(
+      join(sessionDir, "team-state.json"),
+      JSON.stringify({ active: true, team_name: "delta" }),
+    );
+
+    const overlay = await generateOverlay(tempDir, sessionId);
+    assert.ok(overlay.includes("- team: phase: running"));
+    assert.equal(overlay.includes("- autoresearch:"), false);
+  });
 });
 
 describe("applyOverlay + stripOverlay roundtrip", () => {
