@@ -4326,6 +4326,83 @@ esac
     }
   });
 
+  it('shutdownTeam reconciles stale leader and hud pane ids before native Windows split-pane teardown', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-runtime-shutdown-win32-stale-topology-'));
+    const teamName = 'team-win32-stale-topo';
+    try {
+      await withNativeWindowsPlatform(async () => {
+        await withMockTmuxFixture(
+          {
+            dirPrefix: 'omx-runtime-shutdown-win32-stale-topology-bin-',
+            tmuxScript: (tmuxLogPath) => `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "${tmuxLogPath}"
+case "$1" in
+  -V)
+    echo "tmux 3.4"
+    exit 0
+    ;;
+  list-panes)
+    case "$*" in
+      *"-F #{pane_dead} #{pane_pid}"*)
+        exit 1
+        ;;
+      *"-t leader:0 -F #{pane_id}"*"#{pane_current_command}"*)
+        printf "%%21\\tpwsh\\tpwsh\\n%%22\\tnode\\tnode /tmp/bin/omx.js hud --watch\\n%%23\\tcodex\\tcodex\\n%%24\\tcodex\\tcodex\\n"
+        exit 0
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+    ;;
+  split-window)
+    printf '%%44\\n'
+    exit 0
+    ;;
+  kill-pane|resize-pane|select-pane)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`,
+          },
+          async ({ tmuxLogPath }) => {
+            await initTeamState(teamName, 'shutdown win32 stale topology test', 'executor', 2, cwd);
+            const config = await readTeamConfig(teamName, cwd);
+            assert.ok(config);
+            if (!config) return;
+            config.tmux_session = 'leader:0';
+            config.leader_pane_id = '%11';
+            config.hud_pane_id = '%12';
+            config.workers[0]!.pane_id = '%23';
+            config.workers[1]!.pane_id = '%24';
+            await saveTeamConfig(config, cwd);
+
+            await shutdownTeam(teamName, cwd, { force: true });
+
+            const teamRoot = join(cwd, '.omx', 'state', 'team', teamName);
+            assert.equal(existsSync(teamRoot), false);
+            assert.equal(await readMonitorSnapshot(teamName, cwd), null);
+
+            const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
+            assert.doesNotMatch(tmuxLog, /list-panes -t %21 -F #\{pane_pid\}/);
+            assert.doesNotMatch(tmuxLog, /kill-pane -t %21/);
+            assert.match(tmuxLog, /kill-pane -t %22/);
+            assert.match(tmuxLog, /kill-pane -t %23/);
+            assert.match(tmuxLog, /kill-pane -t %24/);
+            assert.match(tmuxLog, new RegExp(`split-window -v -l ${HUD_TMUX_TEAM_HEIGHT_LINES} -t %21 -d -P -F #\\{pane_id\\}`));
+            assert.match(tmuxLog, /select-pane -t %21/);
+          },
+        );
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('shutdownTeam skips prekill and keeps the leader pane alive on shared-session shutdown', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'omx-runtime-shutdown-shared-session-'));
     try {

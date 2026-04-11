@@ -1710,6 +1710,12 @@ export interface PaneTeardownOptions {
   graceMs?: number;
 }
 
+export interface SharedSessionShutdownTopology {
+  livePaneIds: string[];
+  leaderPaneId: string | null;
+  hudPaneIds: string[];
+}
+
 function normalizePaneTarget(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -1747,6 +1753,39 @@ function normalizePaneTargets(
   }
 
   return { killablePaneIds, excluded };
+}
+
+export function resolveSharedSessionShutdownTopology(
+  sessionName: string,
+  preferredLeaderPaneId?: string | null,
+): SharedSessionShutdownTopology {
+  const panes = listPanes(sessionName);
+  const livePaneIds = panes
+    .map((pane) => normalizePaneTarget(pane.paneId))
+    .filter((paneId): paneId is string => Boolean(paneId));
+  const fallbackLeaderPaneId = normalizePaneTarget(preferredLeaderPaneId);
+  if (panes.length === 0) {
+    return {
+      livePaneIds,
+      leaderPaneId: fallbackLeaderPaneId,
+      hudPaneIds: [],
+    };
+  }
+
+  const resolvedLeaderPaneId = normalizePaneTarget(
+    chooseTeamLeaderPaneId(panes, fallbackLeaderPaneId ?? ''),
+  ) ?? fallbackLeaderPaneId;
+  const hudPaneIds = panes
+    .filter((pane) => pane.paneId !== resolvedLeaderPaneId)
+    .filter((pane) => isHudWatchPane(pane))
+    .map((pane) => pane.paneId)
+    .filter((paneId) => paneId.startsWith('%'));
+
+  return {
+    livePaneIds,
+    leaderPaneId: resolvedLeaderPaneId,
+    hudPaneIds,
+  };
 }
 
 /**

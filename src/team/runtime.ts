@@ -30,6 +30,7 @@ import {
   destroyTeamSession,
   listPaneIds,
   listTeamSessions,
+  resolveSharedSessionShutdownTopology,
 } from './tmux-session.js';
 import {
   teamInit as initTeamState,
@@ -278,12 +279,20 @@ function collectShutdownPaneIds(params: {
   config: TeamConfig;
   livePaneIds?: string[];
   restoredStandaloneHudPaneId?: string | null;
+  leaderPaneId?: string | null;
+  hudPaneId?: string | null;
 }): string[] {
-  const { config, livePaneIds = [], restoredStandaloneHudPaneId = null } = params;
+  const {
+    config,
+    livePaneIds = [],
+    restoredStandaloneHudPaneId = null,
+    leaderPaneId = config.leader_pane_id,
+    hudPaneId = config.hud_pane_id,
+  } = params;
   const excludedPaneIds = new Set(
     [
-      config.leader_pane_id,
-      config.hud_pane_id,
+      leaderPaneId,
+      hudPaneId,
       restoredStandaloneHudPaneId,
     ].filter((paneId): paneId is string => typeof paneId === 'string' && paneId.trim().startsWith('%')),
   );
@@ -2987,8 +2996,20 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
   const leaderPaneId = config.leader_pane_id;
   const hudPaneId = config.hud_pane_id;
   if (config.worker_launch_mode === 'interactive') {
-    const livePaneIds = listPaneIds(sessionName);
-    let shutdownPaneIds = collectShutdownPaneIds({ config, livePaneIds });
+    const sharedSessionTopology = sessionName.includes(':')
+      ? resolveSharedSessionShutdownTopology(sessionName, leaderPaneId)
+      : null;
+    const effectiveLeaderPaneId = sharedSessionTopology?.leaderPaneId ?? leaderPaneId;
+    const effectiveHudPaneId = sharedSessionTopology?.hudPaneIds.find((paneId) => paneId === hudPaneId)
+      ?? sharedSessionTopology?.hudPaneIds[0]
+      ?? hudPaneId;
+    const livePaneIds = sharedSessionTopology?.livePaneIds ?? listPaneIds(sessionName);
+    let shutdownPaneIds = collectShutdownPaneIds({
+      config,
+      livePaneIds,
+      leaderPaneId: effectiveLeaderPaneId,
+      hudPaneId: effectiveHudPaneId,
+    });
     if (shouldPrekillInteractiveShutdownProcessTrees(sessionName)) {
       const workerPanePids = shutdownPaneIds
         .map((paneId) => getWorkerPanePid(sessionName, 1, paneId))
@@ -3017,10 +3038,10 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
       console.warn(`[team shutdown] ${sanitized}: ${resizeHookWarning}; continuing teardown`);
     }
     let restoredHudPaneId: string | null = null;
-    if (hudPaneId) {
-      await killWorkerByPaneIdAsync(hudPaneId, leaderPaneId ?? undefined);
+    if (effectiveHudPaneId) {
+      await killWorkerByPaneIdAsync(effectiveHudPaneId, effectiveLeaderPaneId ?? undefined);
       if (sessionName.includes(':')) {
-        restoredHudPaneId = restoreStandaloneHudPane(leaderPaneId, cwd);
+        restoredHudPaneId = restoreStandaloneHudPane(effectiveLeaderPaneId, cwd);
         if (!restoredHudPaneId) {
           console.warn(`[team shutdown] ${sanitized}: failed to restore standalone HUD pane`);
         }
@@ -3030,10 +3051,12 @@ export async function shutdownTeam(teamName: string, cwd: string, options: Shutd
       config,
       livePaneIds: listPaneIds(sessionName),
       restoredStandaloneHudPaneId: restoredHudPaneId,
+      leaderPaneId: effectiveLeaderPaneId,
+      hudPaneId: effectiveHudPaneId,
     });
     await teardownWorkerPanes(shutdownPaneIds, {
-      leaderPaneId,
-      hudPaneId: restoredHudPaneId ?? hudPaneId,
+      leaderPaneId: effectiveLeaderPaneId,
+      hudPaneId: restoredHudPaneId ?? effectiveHudPaneId,
     });
 
     // 4. Destroy tmux session
