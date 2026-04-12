@@ -9,9 +9,6 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import {
   ensureReusableNodeModules,
-  hasUsableNodeModules,
-  resolveGitCommonDir,
-  resolveReusableNodeModulesSource,
 } from '../utils/repo-deps.js';
 
 export {
